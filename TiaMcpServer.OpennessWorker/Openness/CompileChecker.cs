@@ -126,21 +126,92 @@ public static class CompileChecker
 
     private static CompilerResult CompileObject(object compilable)
     {
-        var compileMethod = FindCompileMethod(compilable.GetType());
+        object compileTarget = ResolveCompilableService(compilable) ?? compilable;
+
+        var compileMethod = FindCompileMethod(compileTarget.GetType());
         if (compileMethod == null)
         {
-            throw new InvalidOperationException($"Object '{compilable.GetType().Name}' does not expose a Compile method.");
+            throw new InvalidOperationException($"Object '{compilable.GetType().Name}' does not expose a Compile service or method.");
         }
 
         try
         {
-            return (CompilerResult)compileMethod.Invoke(compilable, null)!;
+            return (CompilerResult)compileMethod.Invoke(compileTarget, null)!;
         }
         catch (TargetInvocationException ex) when (ex.InnerException is not null)
         {
             ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
             throw;
         }
+    }
+
+    private static object? ResolveCompilableService(object compilable)
+    {
+        Type? compilableServiceType = ResolveType("Siemens.Engineering.Compiler.ICompilable");
+        if (compilableServiceType == null)
+        {
+            return null;
+        }
+
+        var getServiceMethod = FindGenericGetServiceMethod(compilable.GetType());
+        if (getServiceMethod == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return getServiceMethod.MakeGenericMethod(compilableServiceType).Invoke(compilable, null);
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
+        }
+    }
+
+    private static Type? ResolveType(string fullName)
+    {
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            Type? type = assembly.GetType(fullName, throwOnError: false);
+            if (type != null)
+            {
+                return type;
+            }
+        }
+
+        return null;
+    }
+
+    private static MethodInfo? FindGenericGetServiceMethod(Type type)
+    {
+        var method = type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(IsGenericGetServiceMethod);
+        if (method != null)
+        {
+            return method;
+        }
+
+        foreach (var interfaceType in type.GetInterfaces())
+        {
+            method = interfaceType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .FirstOrDefault(IsGenericGetServiceMethod);
+            if (method != null)
+            {
+                return method;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsGenericGetServiceMethod(MethodInfo method)
+    {
+        return method.Name == "GetService" &&
+            method.IsGenericMethodDefinition &&
+            method.GetGenericArguments().Length == 1 &&
+            method.GetParameters().Length == 0;
     }
 
     private static MethodInfo? FindCompileMethod(Type type)
