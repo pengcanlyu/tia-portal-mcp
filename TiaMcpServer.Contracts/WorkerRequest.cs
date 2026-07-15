@@ -291,6 +291,37 @@ public class WorkerRequest
 
     #endregion
 
+    #region OPC UA server interfaces
+
+    /// <summary>Forwarded by OPC UA interface tools. Existing or requested interface name.</summary>
+    public string? InterfaceName { get; set; }
+
+    /// <summary>Forwarded by inspect/generate OPC UA interface tools. Namespace URI.</summary>
+    public string? InterfaceUri { get; set; }
+
+    /// <summary>Preserve PLC block-group folders in the generated OPC UA browse tree.</summary>
+    public bool KeepFolderStructure { get; set; }
+
+    /// <summary>Include individual variables in an inspection response.</summary>
+    public bool IncludeVariables { get; set; }
+
+    /// <summary>Maximum individual variables returned by an inspection response.</summary>
+    public int MaxVariables { get; set; } = 200;
+
+    /// <summary>Requested OPC UA interface enabled state.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Allow replacing an existing interface with the requested name.</summary>
+    public bool ReplaceExisting { get; set; }
+
+    /// <summary>Optional XML export path for an OPC UA interface.</summary>
+    public string? ExportPath { get; set; }
+
+    /// <summary>Optional UTF-8 JSON NodeId catalog path.</summary>
+    public string? CatalogPath { get; set; }
+
+    #endregion
+
     #region Project lifecycle
 
     /// <summary>Forwarded by: create_project.</summary>

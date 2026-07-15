@@ -900,6 +900,129 @@ public class OpennessWorkerClient : IDisposable
             BindingTransition.Clear);
     }
 
+    public Task<WorkerCallResult> ListOpcUaInterfacesAsync(string? plcName, string? projectPath)
+    {
+        return SendBoundProjectRequestAsync(
+            "list_opcua_interfaces",
+            projectPath,
+            request => request.PlcName = plcName,
+            "{}");
+    }
+
+    public Task<WorkerCallResult> InspectOpcUaVariablesAsync(
+        string? plcName,
+        string interfaceName,
+        string interfaceUri,
+        bool keepFolderStructure,
+        bool includeVariables,
+        int maxVariables,
+        string? projectPath)
+    {
+        return SendBoundProjectRequestAsync(
+            "inspect_opcua_variables",
+            projectPath,
+            request =>
+            {
+                request.PlcName = plcName;
+                request.InterfaceName = interfaceName;
+                request.InterfaceUri = interfaceUri;
+                request.KeepFolderStructure = keepFolderStructure;
+                request.IncludeVariables = includeVariables;
+                request.MaxVariables = maxVariables;
+            },
+            "{}");
+    }
+
+    public Task<WorkerCallResult> ExportOpcUaInterfaceAsync(
+        string? plcName,
+        string interfaceName,
+        string exportPath,
+        string? catalogPath,
+        string? projectPath)
+    {
+        return SendBoundProjectRequestAsync(
+            "export_opcua_interface",
+            projectPath,
+            request =>
+            {
+                request.PlcName = plcName;
+                request.InterfaceName = interfaceName;
+                request.ExportPath = exportPath;
+                request.CatalogPath = catalogPath;
+            },
+            "{}");
+    }
+
+    public Task<WorkerCallResult> GenerateOpcUaInterfaceAsync(
+        string? plcName,
+        string interfaceName,
+        string interfaceUri,
+        bool keepFolderStructure,
+        bool enabled,
+        bool replaceExisting,
+        string? author,
+        string? exportPath,
+        string? catalogPath,
+        string? projectPath)
+    {
+        return SendBoundProjectRequestAsync(
+            "generate_opcua_interface",
+            projectPath,
+            request =>
+            {
+                request.PlcName = plcName;
+                request.InterfaceName = interfaceName;
+                request.InterfaceUri = interfaceUri;
+                request.KeepFolderStructure = keepFolderStructure;
+                request.Enabled = enabled;
+                request.ReplaceExisting = replaceExisting;
+                request.Author = author;
+                request.ExportPath = exportPath;
+                request.CatalogPath = catalogPath;
+                request.Confirm = true;
+                request.AllowTiaConfirmations = true;
+            },
+            "{}");
+    }
+
+    public Task<WorkerCallResult> SetOpcUaInterfaceEnabledAsync(
+        string? plcName,
+        string interfaceName,
+        bool enabled,
+        string? projectPath)
+    {
+        return SendBoundProjectRequestAsync(
+            "set_opcua_interface_enabled",
+            projectPath,
+            request =>
+            {
+                request.PlcName = plcName;
+                request.InterfaceName = interfaceName;
+                request.Enabled = enabled;
+                request.Confirm = true;
+                request.AllowTiaConfirmations = true;
+            },
+            "{}");
+    }
+
+    public Task<WorkerCallResult> DeleteOpcUaInterfaceAsync(
+        string? plcName,
+        string interfaceName,
+        string? projectPath)
+    {
+        return SendBoundProjectRequestAsync(
+            "delete_opcua_interface",
+            projectPath,
+            request =>
+            {
+                request.PlcName = plcName;
+                request.InterfaceName = interfaceName;
+                request.Confirm = true;
+                request.AllowTiaConfirmations = true;
+            },
+            "{}");
+    }
+
     private async Task<WorkerCallResult> SendBoundProjectRequestAsync(
         string method,
         string? projectPath,

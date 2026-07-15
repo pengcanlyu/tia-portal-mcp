@@ -23,7 +23,7 @@ public static class ArchiveModeNames
             return true;
         }
 
-        var trimmed = value.Trim();
+        var trimmed = value!.Trim();
         foreach (var candidate in new[]
                  {
                      None,

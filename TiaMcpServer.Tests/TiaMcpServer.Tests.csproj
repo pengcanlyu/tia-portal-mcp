@@ -65,6 +65,8 @@
       Link="Host\StandaloneToolResultFormatter.cs" />
     <Compile Include="..\TiaMcpServer\Tools\ProjectWriteTools.cs"
       Link="Host\ProjectWriteTools.cs" />
+    <Compile Include="..\TiaMcpServer\Tools\OpcUaTools.cs"
+      Link="Host\OpcUaTools.cs" />
     <Compile Include="..\TiaMcpServer\Batch\BatchOperationRequest.cs"
       Link="Host\Batch\BatchOperationRequest.cs" />
     <Compile Include="..\TiaMcpServer\Batch\BatchOperationCatalog.cs"
