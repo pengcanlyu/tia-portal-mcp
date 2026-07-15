@@ -12,7 +12,7 @@ public static class BatchWorkerInvoker
     /// <summary>Reads the current state a write item's safety token binds to.</summary>
     public static Task<string> ReadCurrentStateAsync(OpennessWorkerClient client, BatchOperationRequest op) => op.Operation switch
     {
-        "update_block_logic" => client.GetBlockContentAsync(op.BlockPath!, op.ProjectPath),
+        "update_block_logic" => ReadBlockCurrentStateAsync(client, op),
         "create_tag_table" or "delete_tag_table"
             or "create_tag" or "update_tag" or "delete_tag"
             or "create_user_constant" or "update_user_constant" or "delete_user_constant"
@@ -21,6 +21,22 @@ public static class BatchWorkerInvoker
             => client.ReadHardwareConfigAsync(op.ProjectPath),
         _ => Task.FromResult($"Error: Unsupported batch write operation '{op.Operation}'."),
     };
+
+    private static async Task<string> ReadBlockCurrentStateAsync(OpennessWorkerClient client, BatchOperationRequest op)
+    {
+        var state = await client.GetBlockContentAsync(op.BlockPath!, op.ProjectPath).ConfigureAwait(false);
+        if (IsMissingBlockState(state))
+        {
+            return $"<block-current-state status=\"missing\" path=\"{op.BlockPath}\" />";
+        }
+
+        return state;
+    }
+
+    private static bool IsMissingBlockState(string state)
+        => state.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)
+            && (state.Contains(" not found", StringComparison.OrdinalIgnoreCase)
+                || state.Contains(" was not found", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Executes a single read or write item against the worker.</summary>
     public static Task<string> InvokeAsync(OpennessWorkerClient client, BatchOperationRequest op) => op.Operation switch

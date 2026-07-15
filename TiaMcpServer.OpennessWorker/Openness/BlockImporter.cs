@@ -54,7 +54,7 @@ public static class BlockImporter
 
             if (result.State != DocumentResultState.Success)
             {
-                throw new InvalidOperationException($"Import failed with state: {result.State}");
+                throw new InvalidOperationException($"Import failed with state: {result.State}. {DescribeResult(result)}");
             }
 
             return $"Import succeeded: state={result.State}";
@@ -65,6 +65,93 @@ public static class BlockImporter
             {
                 Directory.Delete(tempDir, true);
             }
+        }
+    }
+
+    private static string DescribeResult(object result)
+    {
+        try
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            foreach (var prop in result.GetType().GetProperties())
+            {
+                object? value;
+                try
+                {
+                    value = prop.GetValue(result);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (value is null)
+                {
+                    continue;
+                }
+
+                if (value is System.Collections.IEnumerable enumerable && value is not string)
+                {
+                    var items = new System.Collections.Generic.List<string>();
+                    foreach (var item in enumerable)
+                    {
+                        items.Add(DescribeObject(item));
+                    }
+
+                    if (items.Count > 0)
+                    {
+                        parts.Add($"{prop.Name}=[{string.Join("; ", items)}]");
+                    }
+                }
+                else
+                {
+                    parts.Add($"{prop.Name}={value}");
+                }
+            }
+
+            return string.Join(" | ", parts);
+        }
+        catch (Exception ex)
+        {
+            return $"Could not describe import result: {ex.Message}";
+        }
+    }
+
+    private static string DescribeObject(object? item)
+    {
+        if (item is null)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            foreach (var prop in item.GetType().GetProperties())
+            {
+                object? value;
+                try
+                {
+                    value = prop.GetValue(item);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (value is null)
+                {
+                    continue;
+                }
+
+                parts.Add($"{prop.Name}={value}");
+            }
+
+            return parts.Count > 0 ? "{" + string.Join(", ", parts) + "}" : item.ToString() ?? string.Empty;
+        }
+        catch
+        {
+            return item.ToString() ?? string.Empty;
         }
     }
 
