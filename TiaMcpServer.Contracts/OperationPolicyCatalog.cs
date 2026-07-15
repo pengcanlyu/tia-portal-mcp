@@ -89,6 +89,8 @@ public static class OperationPolicyCatalog
             ["list_network_objects"] = OperationCapability.Observe,
             ["inspect_network_object"] = OperationCapability.Observe,
             ["probe_network_object_attributes"] = OperationCapability.Observe,
+            ["list_opcua_interfaces"] = OperationCapability.Observe,
+            ["inspect_opcua_variables"] = OperationCapability.Observe,
 
             // SafetyRead (read-only safe, but requires a verified expected identity)
             ["read_create_block_safety_snapshot"] = OperationCapability.SafetyRead,
@@ -105,6 +107,7 @@ public static class OperationPolicyCatalog
 
             // TemporaryExport (read-only safe, temporary files with cleanup)
             ["get_block_content"] = OperationCapability.TemporaryExport,
+            ["export_opcua_interface"] = OperationCapability.TemporaryExport,
 
             // Compile (NOT read-only safe)
             ["compile_check"] = OperationCapability.Compile,
@@ -137,6 +140,9 @@ public static class OperationPolicyCatalog
             ["update_subnet"] = OperationCapability.ProjectMutation,
             ["delete_subnet"] = OperationCapability.ProjectMutation,
             ["probe_subnet_lifecycle_mutations"] = OperationCapability.ProjectMutation,
+            ["generate_opcua_interface"] = OperationCapability.ProjectMutation,
+            ["set_opcua_interface_enabled"] = OperationCapability.ProjectMutation,
+            ["delete_opcua_interface"] = OperationCapability.ProjectMutation,
 
             // OnlineControl (NOT read-only safe)
             ["start_plc"] = OperationCapability.OnlineControl,

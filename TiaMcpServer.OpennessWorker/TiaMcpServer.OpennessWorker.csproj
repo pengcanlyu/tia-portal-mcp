@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Openness\OpcUa\SiemensGenerator\InterfaceTemplate.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="Siemens.Engineering.Base">
       <HintPath>$(TiaOpennessReferenceDir)\Siemens.Engineering.Base.dll</HintPath>
       <Private>False</Private>
