@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Siemens.Engineering;
 using TiaMcpServer.Contracts;
 using TiaMcpServer.OpennessWorker.Openness;
+using TiaMcpServer.OpennessWorker.Openness.OpcUa;
 using WorkerTiaPortalSession = TiaMcpServer.OpennessWorker.Openness.TiaPortalSession;
 
 namespace TiaMcpServer.OpennessWorker;
@@ -76,6 +77,12 @@ internal static class Program
                 "save_project_as"     => SaveProjectAs(request),
                 "archive_project"     => ArchiveProject(request),
                 "close_project"       => CloseProject(request),
+                "list_opcua_interfaces" => ListOpcUaInterfaces(request),
+                "inspect_opcua_variables" => InspectOpcUaVariables(request),
+                "export_opcua_interface" => ExportOpcUaInterface(request),
+                "generate_opcua_interface" => GenerateOpcUaInterface(request),
+                "set_opcua_interface_enabled" => SetOpcUaInterfaceEnabled(request),
+                "delete_opcua_interface" => DeleteOpcUaInterface(request),
                 _                     => Failure($"Unsupported worker method '{request.Method}'.")
             };
         }
@@ -391,6 +398,105 @@ internal static class Program
             request,
             session => ProjectLifecycleService.CloseProject(session, request.ProjectPath, request.SaveBeforeClose),
             requiresConfirm: true);
+    }
+
+    private static WorkerResponse ListOpcUaInterfaces(WorkerRequest request)
+    {
+        return WithProject(request, project => Success(OpcUaInterfaceService.List(project, request.PlcName)));
+    }
+
+    private static WorkerResponse InspectOpcUaVariables(WorkerRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.InterfaceName) || string.IsNullOrWhiteSpace(request.InterfaceUri))
+        {
+            return Failure("InterfaceName and InterfaceUri are required.");
+        }
+
+        return WithProject(request, project => Success(OpcUaInterfaceService.Inspect(
+            project,
+            request.PlcName,
+            request.InterfaceName!,
+            request.InterfaceUri!,
+            request.KeepFolderStructure,
+            request.IncludeVariables,
+            request.MaxVariables)));
+    }
+
+    private static WorkerResponse ExportOpcUaInterface(WorkerRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.InterfaceName) || string.IsNullOrWhiteSpace(request.ExportPath))
+        {
+            return Failure("InterfaceName and ExportPath are required.");
+        }
+
+        return WithProject(request, project => Success(OpcUaInterfaceService.Export(
+            project,
+            request.PlcName,
+            request.InterfaceName!,
+            request.ExportPath!,
+            request.CatalogPath)));
+    }
+
+    private static WorkerResponse GenerateOpcUaInterface(WorkerRequest request)
+    {
+        if (!request.Confirm)
+        {
+            return Failure("Operation not confirmed. Set confirm=true to generate the OPC UA server interface.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.InterfaceName) || string.IsNullOrWhiteSpace(request.InterfaceUri))
+        {
+            return Failure("InterfaceName and InterfaceUri are required.");
+        }
+
+        return WithProject(request, project => Success(OpcUaInterfaceService.Generate(
+            project,
+            request.PlcName,
+            request.InterfaceName!,
+            request.InterfaceUri!,
+            request.KeepFolderStructure,
+            request.Enabled,
+            request.ReplaceExisting,
+            request.Author,
+            request.ExportPath,
+            request.CatalogPath)));
+    }
+
+    private static WorkerResponse SetOpcUaInterfaceEnabled(WorkerRequest request)
+    {
+        if (!request.Confirm)
+        {
+            return Failure("Operation not confirmed. Set confirm=true to change the OPC UA interface state.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.InterfaceName))
+        {
+            return Failure("InterfaceName is required.");
+        }
+
+        return WithProject(request, project => Success(OpcUaInterfaceService.SetEnabled(
+            project,
+            request.PlcName,
+            request.InterfaceName!,
+            request.Enabled)));
+    }
+
+    private static WorkerResponse DeleteOpcUaInterface(WorkerRequest request)
+    {
+        if (!request.Confirm)
+        {
+            return Failure("Operation not confirmed. Set confirm=true to delete the OPC UA interface.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.InterfaceName))
+        {
+            return Failure("InterfaceName is required.");
+        }
+
+        return WithProject(request, project => Success(OpcUaInterfaceService.Delete(
+            project,
+            request.PlcName,
+            request.InterfaceName!)));
     }
 
     private static WorkerResponse TagMutation(WorkerRequest request, Func<Project, TagMutationResultInfo> mutate)

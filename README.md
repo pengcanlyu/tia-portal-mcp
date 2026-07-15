@@ -2,18 +2,18 @@
 
 MCP server for Siemens SIMATIC TIA Portal V21. It lets MCP clients and AI agents inspect a running TIA Portal project through the Siemens Openness API.
 
-The current implementation covers project discovery and lifecycle operations, PLC block export/import, tag table reads and guarded tag mutations, hardware/network discovery, cross-reference diagnostics, hardware catalog search, guarded network-device provisioning, and compile/check diagnostics.
+The current implementation covers project discovery and lifecycle operations, PLC block export/import, tag table reads and guarded tag mutations, hardware/network discovery, cross-reference diagnostics, hardware catalog search, guarded network-device provisioning, compile/check diagnostics, and OPC UA user-modelled server-interface generation.
 
 ## Tools
 
-The server currently exposes 16 tools.
+The server currently exposes 25 tools.
 
 ### Batch operations
 
 - `execute_read_batch` - run up to 50 read operations in one call. Each item carries an `operationId`, an `operation` name (e.g. `get_block_content`, `list_tag_tables`), and that operation's parameters. Reads run independently, so a failing item does not stop the others.
 - `preview_write_batch` / `apply_write_batch` - preview up to 50 write operations and receive one batch-level `safetyToken` bound to the exact ordered operation list and the combined current state, then apply them. Apply runs sequentially, stops on the first failure, and marks later items `skipped` (no transaction or rollback). Requires `confirm=true` and the `safetyToken`. Batches cover data writes (block, tag table, tag, user constant, network device); project-lifecycle operations stay single-tool only.
 
-The batch tools are the only path for data operations. Each `operation` name (e.g. `get_block_content`, `list_tag_tables`, `create_tag`, `update_block_logic`, `add_network_device`) carries that operation's parameters as one item; a single operation is just a one-item batch.
+The batch tools are the path for block, tag, and hardware data operations. OPC UA server-interface and project-lifecycle tools remain standalone because they have dedicated transactional checks and verification.
 
 Available read operations (for `execute_read_batch`): `browse_project_tree`, `get_block_content`, `list_tag_tables`, `read_hardware_config`, `read_cross_references`, `search_equipment_catalog`, `compile_check`.
 
@@ -23,6 +23,19 @@ Available write operations (for `preview_write_batch` / `apply_write_batch`): `u
 
 - `get_project_status` - read active project metadata.
 - `preview_open_project` / `preview_create_project` / `preview_save_project` / `preview_save_project_as` / `preview_archive_project` / `preview_close_project` plus matching write tools - project lifecycle operations. These stay single-tool only (not batchable). Writes require `confirm=true` and `safetyToken`.
+
+### OPC UA interface tools
+
+- `list_opcua_interfaces` - list user-modelled OPC UA server interfaces and their enabled state.
+- `inspect_opcua_variables` - generate an interface in memory and report accessible global-DB variables without changing the project. By default it returns summary and per-DB counts; set `includeVariables=true` for individual NodeIds.
+- `export_opcua_interface` - export an existing interface to XML and optionally write a UTF-8 JSON NodeId catalog.
+- `preview_generate_opcua_interface` / `generate_opcua_interface` - create or transactionally replace an interface. The generator preserves each DB member's `ExternalAccessible` and `ExternalWritable` settings. It intentionally excludes PLC tag tables and instance DBs.
+- `preview_set_opcua_interface_enabled` / `set_opcua_interface_enabled` - enable or disable an interface.
+- `preview_delete_opcua_interface` / `delete_opcua_interface` - delete an interface.
+
+OPC UA writes use the same preview/confirm/safety-token workflow as other project writes. Replacement exports the previous interface first and restores it if the new import fails.
+
+The generator is adapted from Siemens' MIT-licensed `tia-addin-opc-ua-modelled-interface` project. The copied source and license notice are under `TiaMcpServer.OpennessWorker/Openness/OpcUa/SiemensGenerator`.
 
 ## Write safety
 

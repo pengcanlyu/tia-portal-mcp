@@ -60,7 +60,20 @@ public class TiaPortalSession : IDisposable
             throw new FileNotFoundException("TIA Portal project file was not found.", projectPath);
         }
 
-        Project = _tiaPortal!.Projects.Open(new FileInfo(projectPath));
+        var requestedPath = Path.GetFullPath(projectPath);
+        if (Project is not null)
+        {
+            var openPath = Path.GetFullPath(Project.Path.FullName);
+            if (string.Equals(openPath, requestedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"TIA Portal already has project '{openPath}' open. Close it before opening '{requestedPath}'.");
+        }
+
+        Project = _tiaPortal!.Projects.Open(new FileInfo(requestedPath));
     }
 
     public void EnsureConnected()

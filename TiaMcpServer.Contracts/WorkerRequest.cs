@@ -83,4 +83,22 @@ public class WorkerRequest
     public bool SaveBeforeArchive { get; set; } = true;
 
     public bool SaveBeforeClose { get; set; } = true;
+
+    public string? InterfaceName { get; set; }
+
+    public string? InterfaceUri { get; set; }
+
+    public bool KeepFolderStructure { get; set; }
+
+    public bool Enabled { get; set; }
+
+    public bool ReplaceExisting { get; set; }
+
+    public string? ExportPath { get; set; }
+
+    public string? CatalogPath { get; set; }
+
+    public bool IncludeVariables { get; set; }
+
+    public int MaxVariables { get; set; } = 200;
 }
