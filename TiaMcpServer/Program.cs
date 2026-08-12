@@ -84,14 +84,16 @@ namespace TiaMcpServer
                 .WithStdioServerTransport()
                 .WithTools<ProjectReadTools>()
                 .WithTools<ReadBatchTools>()
-                .WithTools<NetworkReadTools>();
+                .WithTools<NetworkReadTools>()
+                .WithTools<OpcUaReadTools>();
 
             if (accessMode == McpAccessMode.ReadWrite)
             {
                 mcp.WithTools<ProjectEngineeringTools>()
                    .WithTools<ProjectWriteTools>()
                    .WithTools<WriteBatchTools>()
-                   .WithTools<NetworkWriteTools>();
+                   .WithTools<NetworkWriteTools>()
+                   .WithTools<OpcUaWriteTools>();
             }
 
             using var host = builder.Build();

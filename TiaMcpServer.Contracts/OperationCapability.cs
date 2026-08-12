@@ -18,6 +18,10 @@ public enum OperationCapability
     /// bound to the verified worker/Portal/project identity.</summary>
     SafetyRead,
 
+    /// <summary>Writes or replaces caller-selected persistent files. Not allowed in read-only
+    /// mode even when the TIA project itself is unchanged.</summary>
+    PersistentFileWrite,
+
     /// <summary>Invokes the Siemens compilation API. Not allowed in read-only mode because
     /// compilation may modify internal project state.</summary>
     Compile,

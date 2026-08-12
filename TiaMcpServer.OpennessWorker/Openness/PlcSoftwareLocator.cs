@@ -9,10 +9,14 @@ public static class PlcSoftwareLocator
 {
     /// <summary>Returns the first PLC software in the project (optionally filtered by device name), or throws if none.</summary>
     public static PlcSoftware Find(Project project, string? plcName)
+        => FindWithIdentity(project, plcName).Software;
+
+    /// <summary>Returns the selected PLC software together with the owning device identity.</summary>
+    public static DiscoveredPlcSoftware FindWithIdentity(Project project, string? plcName)
     {
         foreach (var discovered in FindAll(project, plcName))
         {
-            return discovered.Software;
+            return discovered;
         }
 
         var detail = plcName is not null

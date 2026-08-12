@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Security.Cryptography;
 using Siemens.Engineering;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.OpcUa;
@@ -17,12 +18,15 @@ internal static class OpcUaInterfaceService
 
     public static object List(Project project, string? plcName)
     {
-        var software = PlcSoftwareLocator.Find(project, plcName);
+        var resolved = PlcSoftwareLocator.FindWithIdentity(project, plcName);
+        var software = resolved.Software;
         var interfaces = GetInterfaces(software);
 
         return new
         {
-            plcName,
+            requestedPlcName = plcName,
+            resolvedDeviceName = resolved.DeviceName,
+            resolvedPlcName = software.Name,
             count = interfaces.Count,
             interfaces = interfaces.Select(ToInfo).ToArray()
         };
@@ -37,14 +41,17 @@ internal static class OpcUaInterfaceService
         bool includeVariables,
         int maxVariables)
     {
-        var software = PlcSoftwareLocator.Find(project, plcName);
+        var resolved = PlcSoftwareLocator.FindWithIdentity(project, plcName);
+        var software = resolved.Software;
         var generated = OpcUaInterfaceGenerator.Generate(
             software,
             interfaceName,
             interfaceUri,
             keepFolderStructure);
 
-        return BuildGenerationInfo(interfaceName, interfaceUri, generated, includeVariables, maxVariables);
+        return BuildGenerationInfo(
+            plcName, resolved.DeviceName, software.Name, interfaceName, interfaceUri,
+            generated, includeVariables, maxVariables);
     }
 
     public static object Export(
@@ -54,33 +61,72 @@ internal static class OpcUaInterfaceService
         string exportPath,
         string? catalogPath)
     {
-        var software = PlcSoftwareLocator.Find(project, plcName);
-        var serverInterface = FindInterface(software, interfaceName)
-            ?? throw new InvalidOperationException($"OPC UA server interface '{interfaceName}' was not found.");
-
         EnsureOutputPath(exportPath, ".xml");
-        Directory.CreateDirectory(Path.GetDirectoryName(exportPath)!);
-        serverInterface.Export(new FileInfo(exportPath));
-
-        var document = System.Xml.Linq.XDocument.Load(exportPath);
-        var variables = OpcUaNodeCatalog.Read(document);
-
         if (!string.IsNullOrWhiteSpace(catalogPath))
         {
             EnsureOutputPath(catalogPath!, ".json");
-            Directory.CreateDirectory(Path.GetDirectoryName(catalogPath!)!);
-            File.WriteAllText(catalogPath!, JsonSerializer.Serialize(variables, JsonOptions), new UTF8Encoding(false));
         }
 
-        return new
+        var resolved = PlcSoftwareLocator.FindWithIdentity(project, plcName);
+        var software = resolved.Software;
+        var serverInterface = FindInterface(software, interfaceName)
+            ?? throw new InvalidOperationException($"OPC UA server interface '{interfaceName}' was not found.");
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), "tia-mcp-opcua-export", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var preparedXmlPath = Path.Combine(workingDirectory, "interface.xml");
+        var preparedCatalogPath = Path.Combine(workingDirectory, "catalog.json");
+        var exportBackup = BackupOutputFile(exportPath, workingDirectory, "export.backup");
+        var catalogBackup = BackupOutputFile(catalogPath, workingDirectory, "catalog.backup");
+        var outputsTouched = false;
+
+        try
         {
-            interfaceName,
-            exportPath = Path.GetFullPath(exportPath),
-            catalogPath = string.IsNullOrWhiteSpace(catalogPath) ? null : Path.GetFullPath(catalogPath!),
-            variableCount = variables.Count,
-            readableCount = variables.Count(variable => variable.Readable),
-            writableCount = variables.Count(variable => variable.Writable)
-        };
+            serverInterface.Export(new FileInfo(preparedXmlPath));
+            var document = System.Xml.Linq.XDocument.Load(preparedXmlPath);
+            var variables = OpcUaNodeCatalog.Read(document);
+            if (!string.IsNullOrWhiteSpace(catalogPath))
+            {
+                File.WriteAllText(
+                    preparedCatalogPath,
+                    JsonSerializer.Serialize(variables, JsonOptions),
+                    new UTF8Encoding(false));
+            }
+
+            outputsTouched = true;
+            CommitPreparedFile(preparedXmlPath, exportPath);
+            if (!string.IsNullOrWhiteSpace(catalogPath))
+            {
+                CommitPreparedFile(preparedCatalogPath, catalogPath!);
+            }
+
+            return new
+            {
+                requestedPlcName = plcName,
+                resolvedDeviceName = resolved.DeviceName,
+                resolvedPlcName = software.Name,
+                interfaceName,
+                exportPath = Path.GetFullPath(exportPath),
+                catalogPath = string.IsNullOrWhiteSpace(catalogPath) ? null : Path.GetFullPath(catalogPath!),
+                variableCount = variables.Count,
+                readableCount = variables.Count(variable => variable.Readable),
+                writableCount = variables.Count(variable => variable.Writable)
+            };
+        }
+        catch
+        {
+            if (outputsTouched)
+            {
+                RestoreOutputFile(exportBackup);
+                RestoreOutputFile(catalogBackup);
+            }
+
+            throw;
+        }
+        finally
+        {
+            TryDeleteDirectory(workingDirectory);
+        }
     }
 
     public static object Generate(
@@ -95,9 +141,21 @@ internal static class OpcUaInterfaceService
         string? exportPath,
         string? catalogPath)
     {
-        var software = PlcSoftwareLocator.Find(project, plcName);
+        if (!string.IsNullOrWhiteSpace(exportPath))
+        {
+            EnsureOutputPath(exportPath!, ".xml");
+        }
+
+        if (!string.IsNullOrWhiteSpace(catalogPath))
+        {
+            EnsureOutputPath(catalogPath!, ".json");
+        }
+
+        var resolved = PlcSoftwareLocator.FindWithIdentity(project, plcName);
+        var software = resolved.Software;
         var composition = GetComposition(software);
         var existing = FindInterface(composition, interfaceName);
+        EnsureNoSimaticInterfaceConflict(software, interfaceName);
 
         if (existing is not null && !replaceExisting)
         {
@@ -119,6 +177,11 @@ internal static class OpcUaInterfaceService
         string? backupPath = null;
         bool oldEnabled = false;
         string? oldAuthor = null;
+        bool existingDeleted = false;
+        ServerInterface? created = null;
+        var exportBackup = BackupOutputFile(exportPath, workingDirectory, "export.backup");
+        var catalogBackup = BackupOutputFile(catalogPath, workingDirectory, "catalog.backup");
+        var outputsTouched = false;
 
         try
         {
@@ -129,41 +192,23 @@ internal static class OpcUaInterfaceService
                 oldEnabled = existing.Enabled;
                 oldAuthor = existing.Author;
                 existing.Delete();
+                existingDeleted = true;
             }
 
-            ServerInterface? created = null;
-            try
-            {
-                created = composition.Create(interfaceName);
-                created.Import(new FileInfo(generatedPath));
-                created.Author = string.IsNullOrWhiteSpace(author) ? "TIA MCP" : author!;
-                created.Enabled = enabled;
-            }
-            catch
-            {
-                try
-                {
-                    created?.Delete();
-                }
-                catch
-                {
-                    // Continue into restoration of the previous interface.
-                }
+            created = composition.Create(interfaceName);
+            created.Import(new FileInfo(generatedPath));
+            created.Author = string.IsNullOrWhiteSpace(author) ? "TIA MCP" : author!;
+            created.Enabled = enabled;
 
-                RestorePreviousInterface(composition, interfaceName, backupPath, oldEnabled, oldAuthor);
-                throw;
-            }
-
+            outputsTouched = true;
             if (!string.IsNullOrWhiteSpace(exportPath))
             {
-                EnsureOutputPath(exportPath!, ".xml");
                 Directory.CreateDirectory(Path.GetDirectoryName(exportPath!)!);
                 File.WriteAllText(exportPath!, generated.Xml, new UTF8Encoding(false));
             }
 
             if (!string.IsNullOrWhiteSpace(catalogPath))
             {
-                EnsureOutputPath(catalogPath!, ".json");
                 Directory.CreateDirectory(Path.GetDirectoryName(catalogPath!)!);
                 File.WriteAllText(catalogPath!, JsonSerializer.Serialize(generated.Variables, JsonOptions), new UTF8Encoding(false));
             }
@@ -171,23 +216,45 @@ internal static class OpcUaInterfaceService
             return new
             {
                 operation = existing is null ? "created" : "replaced",
+                requestedPlcName = plcName,
+                resolvedDeviceName = resolved.DeviceName,
+                resolvedPlcName = software.Name,
                 enabled,
                 author = string.IsNullOrWhiteSpace(author) ? "TIA MCP" : author,
                 exportPath = string.IsNullOrWhiteSpace(exportPath) ? null : Path.GetFullPath(exportPath!),
                 catalogPath = string.IsNullOrWhiteSpace(catalogPath) ? null : Path.GetFullPath(catalogPath!),
-                generation = BuildGenerationInfo(interfaceName, interfaceUri, generated, includeVariables: false, maxVariables: 0)
+                generation = BuildGenerationInfo(
+                    plcName, resolved.DeviceName, software.Name, interfaceName, interfaceUri,
+                    generated, includeVariables: false, maxVariables: 0)
             };
         }
-        finally
+        catch
         {
             try
             {
-                Directory.Delete(workingDirectory, recursive: true);
+                created?.Delete();
             }
             catch
             {
-                // Temporary files are not part of the project state.
+                // Continue with restoring the prior project and filesystem state.
             }
+
+            if (existingDeleted)
+            {
+                RestorePreviousInterface(composition, interfaceName, backupPath, oldEnabled, oldAuthor);
+            }
+
+            if (outputsTouched)
+            {
+                RestoreOutputFile(exportBackup);
+                RestoreOutputFile(catalogBackup);
+            }
+
+            throw;
+        }
+        finally
+        {
+            TryDeleteDirectory(workingDirectory);
         }
     }
 
@@ -213,6 +280,9 @@ internal static class OpcUaInterfaceService
     }
 
     private static object BuildGenerationInfo(
+        string? requestedPlcName,
+        string resolvedDeviceName,
+        string resolvedPlcName,
         string interfaceName,
         string interfaceUri,
         OpcUaGenerationResult generated,
@@ -231,8 +301,12 @@ internal static class OpcUaInterfaceService
 
         return new
         {
+            requestedPlcName,
+            resolvedDeviceName,
+            resolvedPlcName,
             interfaceName,
             interfaceUri,
+            modelFingerprint = ComputeFingerprint(generated.Xml),
             defaultNodeCount = generated.DefaultNodeCount,
             dataTypeNodeCount = generated.DataTypeNodeCount,
             globalDbNodeCount = generated.GlobalDbNodeCount,
@@ -285,6 +359,26 @@ internal static class OpcUaInterfaceService
         return composition.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static void EnsureNoSimaticInterfaceConflict(PlcSoftware software, string interfaceName)
+    {
+        var provider = software.GetService<OpcUaProvider>()
+            ?? throw new InvalidOperationException("The selected PLC does not expose the OPC UA Openness provider.");
+        var conflict = provider.CommunicationGroup.ServerInterfaceGroup.SimaticInterfaces
+            .FirstOrDefault(item => string.Equals(item.Name, interfaceName, StringComparison.OrdinalIgnoreCase));
+        if (conflict is not null)
+        {
+            throw new InvalidOperationException(
+                $"OPC UA interface name '{interfaceName}' conflicts with an existing SIMATIC interface.");
+        }
+    }
+
+    private static string ComputeFingerprint(string xml)
+    {
+        using var sha256 = SHA256.Create();
+        var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(xml));
+        return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
+    }
+
     private static object ToInfo(ServerInterface item)
     {
         return new
@@ -329,5 +423,73 @@ internal static class OpcUaInterfaceService
         {
             throw new InvalidOperationException($"Output path must use the '{expectedExtension}' extension: '{path}'.");
         }
+    }
+
+    private static OutputFileBackup BackupOutputFile(string? path, string workingDirectory, string backupName)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return new OutputFileBackup(null, null, false);
+        }
+
+        var fullPath = Path.GetFullPath(path!);
+        if (!File.Exists(fullPath))
+        {
+            return new OutputFileBackup(fullPath, null, false);
+        }
+
+        var backupPath = Path.Combine(workingDirectory, backupName);
+        File.Copy(fullPath, backupPath, overwrite: true);
+        return new OutputFileBackup(fullPath, backupPath, true);
+    }
+
+    private static void RestoreOutputFile(OutputFileBackup backup)
+    {
+        if (string.IsNullOrWhiteSpace(backup.TargetPath))
+        {
+            return;
+        }
+
+        if (backup.Existed)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(backup.TargetPath!)!);
+            File.Copy(backup.BackupPath!, backup.TargetPath!, overwrite: true);
+        }
+        else if (File.Exists(backup.TargetPath))
+        {
+            File.Delete(backup.TargetPath);
+        }
+    }
+
+    private static void CommitPreparedFile(string preparedPath, string targetPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+        File.Copy(preparedPath, targetPath, overwrite: true);
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+            // Temporary files are not part of project state.
+        }
+    }
+
+    private sealed class OutputFileBackup
+    {
+        public OutputFileBackup(string? targetPath, string? backupPath, bool existed)
+        {
+            TargetPath = targetPath;
+            BackupPath = backupPath;
+            Existed = existed;
+        }
+
+        public string? TargetPath { get; }
+        public string? BackupPath { get; }
+        public bool Existed { get; }
     }
 }

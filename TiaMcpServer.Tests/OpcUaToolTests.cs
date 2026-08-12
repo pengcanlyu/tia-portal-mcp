@@ -13,7 +13,7 @@ public class OpcUaToolTests
     [Theory]
     [InlineData("ListOpcUaInterfaces", "list_opcua_interfaces", false)]
     [InlineData("InspectOpcUaVariables", "inspect_opcua_variables", false)]
-    [InlineData("ExportOpcUaInterface", "export_opcua_interface", false)]
+    [InlineData("ExportOpcUaInterface", "export_opcua_interface", true)]
     [InlineData("PreviewGenerateOpcUaInterface", "preview_generate_opcua_interface", false)]
     [InlineData("GenerateOpcUaInterface", "generate_opcua_interface", true)]
     [InlineData("PreviewSetOpcUaInterfaceEnabled", "preview_set_opcua_interface_enabled", false)]
@@ -22,7 +22,9 @@ public class OpcUaToolTests
     [InlineData("DeleteOpcUaInterface", "delete_opcua_interface", true)]
     public void OpcUaToolsHaveMcpMetadata(string methodName, string expectedToolName, bool requiresConfirm)
     {
-        var type = typeof(OpcUaTools);
+        var type = methodName is "ListOpcUaInterfaces" or "InspectOpcUaVariables"
+            ? typeof(OpcUaReadTools)
+            : typeof(OpcUaWriteTools);
         Assert.NotNull(type.GetCustomAttribute<McpServerToolTypeAttribute>());
 
         var method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
@@ -51,12 +53,13 @@ public class OpcUaToolTests
     }
 
     [Theory]
+    [InlineData("ExportOpcUaInterface")]
     [InlineData("GenerateOpcUaInterface")]
     [InlineData("SetOpcUaInterfaceEnabled")]
     [InlineData("DeleteOpcUaInterface")]
     public void OpcUaWriteToolsUseCurrentSafetyContract(string methodName)
     {
-        var method = typeof(OpcUaTools).GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+        var method = typeof(OpcUaWriteTools).GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
         Assert.NotNull(method);
         var parameters = method.GetParameters();
         Assert.Contains(parameters, parameter => parameter.ParameterType == typeof(WriteSafetyService));
