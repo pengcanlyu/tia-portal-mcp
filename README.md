@@ -16,7 +16,7 @@ The current implementation covers project discovery and lifecycle operations, PL
 
 ## Tools
 
-The server currently exposes 14 tools in read-write mode and 4 tools in read-only mode.
+The server currently exposes 23 tools in read-write mode and 6 tools in read-only mode.
 
 ### Batch operations
 
@@ -55,6 +55,19 @@ Available write operations (for `preview_write_batch` / `apply_write_batch`): `u
 - `browse_project_tree` — browse a bounded project subtree with optional `depth` and `startPath`.
 - `compile_check` — compile a PLC or selected block and return compiler messages; available only in read-write mode.
 - `open_project` / `create_project` / `save_project` / `save_project_as` / `archive_project` / `close_project` - project lifecycle writes. These stay single-tool only (not batchable) and are self-previewing: call the tool WITHOUT `safetyToken` to get a preview plus a single-use token, then call it again with `confirm=true` and the token to apply.
+
+### OPC UA interface tools
+
+This fork adds guarded management of TIA Portal OPC UA user-modelled interfaces:
+
+- `list_opcua_interfaces` - list the configured interfaces for one PLC.
+- `inspect_opcua_variables` - inspect the generated variables and their read/write exposure.
+- `export_opcua_interface` - export the current interface model and catalog to disk.
+- `preview_generate_opcua_interface` / `generate_opcua_interface` - preview and generate an interface model from the PLC variables.
+- `preview_set_opcua_interface_enabled` / `set_opcua_interface_enabled` - preview and change the enabled state.
+- `preview_delete_opcua_interface` / `delete_opcua_interface` - preview and delete an interface.
+
+Every OPC UA mutation uses the same safety-token contract as the other writes. Generation and export bind the token to the resolved project and PLC identity, include a model fingerprint in the current-state hash, and restore the previous interface/output files when a downstream operation fails.
 
 ## Write safety
 

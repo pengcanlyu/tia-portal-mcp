@@ -14,6 +14,10 @@ public enum OperationCapability
     /// output. Allowed in read-only mode when cleanup is guaranteed.</summary>
     TemporaryExport,
 
+    /// <summary>Writes or replaces caller-selected persistent files. Not allowed in read-only
+    /// mode even when the TIA project itself is unchanged.</summary>
+    PersistentFileWrite,
+
     /// <summary>Invokes the Siemens compilation API. Not allowed in read-only mode because
     /// compilation may modify internal project state.</summary>
     Compile,

@@ -169,6 +169,8 @@ public class ReadOnlyModeTests
     [InlineData("get_block_content")]
     [InlineData("list_network_objects")]
     [InlineData("inspect_network_object")]
+    [InlineData("list_opcua_interfaces")]
+    [InlineData("inspect_opcua_variables")]
     public void ReadOnlyMode_AllowsApprovedOperations(string operation)
     {
         Assert.True(OperationPolicyCatalog.IsAllowed(McpAccessMode.ReadOnly, operation));
@@ -200,6 +202,10 @@ public class ReadOnlyModeTests
     [InlineData("create_subnet")]
     [InlineData("update_subnet")]
     [InlineData("delete_subnet")]
+    [InlineData("export_opcua_interface")]
+    [InlineData("generate_opcua_interface")]
+    [InlineData("set_opcua_interface_enabled")]
+    [InlineData("delete_opcua_interface")]
     [InlineData("start_plc")]
     [InlineData("stop_plc")]
     public void ReadOnlyMode_DeniesProhibitedOperations(string operation)
@@ -522,11 +528,11 @@ public class ReadOnlyModeTests
     #region Tool Discovery Tests
 
     [Fact]
-    public void ReadOnlyMode_HasExactlyFourTools()
+    public void ReadOnlyMode_HasExactlySixTools()
     {
         var networkReadType = typeof(NetworkOperationRequest).Assembly.GetType("TiaMcpServer.Network.NetworkReadTools");
         Assert.NotNull(networkReadType);
-        var toolNames = new[] { typeof(ProjectReadTools), typeof(ReadBatchTools), networkReadType! }
+        var toolNames = new[] { typeof(ProjectReadTools), typeof(ReadBatchTools), networkReadType!, typeof(OpcUaReadTools) }
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
             .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
             .Where(attribute => attribute is not null)
@@ -535,12 +541,17 @@ public class ReadOnlyModeTests
             .ToArray();
 
         Assert.Equal(
-            new[] { "browse_project_tree", "execute_read_batch", "get_project_status", "network_read" },
+            new[]
+            {
+                "browse_project_tree", "execute_read_batch", "get_project_status",
+                "inspect_opcua_variables", "list_opcua_interfaces",
+                "network_read"
+            },
             toolNames);
     }
 
     [Fact]
-    public void ReadWriteMode_HasExactlyFourteenDistinctTools()
+    public void ReadWriteMode_HasExactlyTwentyThreeDistinctTools()
     {
         var toolNames = typeof(ProjectLifecycleTools).Assembly
             .GetTypes()
@@ -556,9 +567,12 @@ public class ReadOnlyModeTests
             new[]
             {
                 "apply_write_batch", "archive_project", "browse_project_tree", "close_project",
-                "compile_check", "create_project", "execute_read_batch", "get_project_status",
-                "network_read", "network_write", "open_project", "preview_write_batch",
-                "save_project", "save_project_as"
+                "compile_check", "create_project", "delete_opcua_interface", "execute_read_batch",
+                "export_opcua_interface", "generate_opcua_interface", "get_project_status",
+                "inspect_opcua_variables", "list_opcua_interfaces", "network_read", "network_write",
+                "open_project", "preview_delete_opcua_interface", "preview_generate_opcua_interface",
+                "preview_set_opcua_interface_enabled", "preview_write_batch", "save_project",
+                "save_project_as", "set_opcua_interface_enabled"
             },
             toolNames);
     }

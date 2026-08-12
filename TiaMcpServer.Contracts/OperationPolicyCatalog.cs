@@ -65,7 +65,7 @@ public static class OperationPolicyCatalog
 
             // TemporaryExport (read-only safe, temporary files with cleanup)
             ["get_block_content"] = OperationCapability.TemporaryExport,
-            ["export_opcua_interface"] = OperationCapability.TemporaryExport,
+            ["export_opcua_interface"] = OperationCapability.PersistentFileWrite,
 
             // Compile (NOT read-only safe)
             ["compile_check"] = OperationCapability.Compile,
