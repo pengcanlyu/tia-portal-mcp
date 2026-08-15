@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
 using ModelContextProtocol.Server;
 using TiaMcpServer.Safety;
 using TiaMcpServer.Worker;
@@ -31,6 +32,7 @@ public static class OpcUaTools
         [Description("Keep TIA block-group folders in the OPC UA browse tree.")] bool keepFolderStructure = false,
         [Description("Include individual variable entries. The summary and per-DB counts are always returned.")] bool includeVariables = false,
         [Description("Maximum individual variable entries when includeVariables=true. Range 1..5000.")] int maxVariables = 200,
+        [Description("Optional absolute JSON path containing the exact sourcePath allowlist to retain.")] string? allowedSourcePathsPath = null,
         [Description("Optional path to a .ap21 project. Uses the active bound project when omitted.")] string? projectPath = null)
     {
         return workerClient.InspectOpcUaVariablesAsync(
@@ -40,7 +42,8 @@ public static class OpcUaTools
             keepFolderStructure,
             includeVariables,
             maxVariables,
-            projectPath);
+            projectPath,
+            allowedSourcePathsPath);
     }
 
     [McpServerTool(Name = "export_opcua_interface")]
@@ -68,6 +71,7 @@ public static class OpcUaTools
         [Description("Author metadata stored on the interface.")] string? author = "TIA MCP",
         [Description("Optional absolute .xml path for a copy of the generated interface.")] string? exportPath = null,
         [Description("Optional absolute .json path for the generated NodeId catalog.")] string? catalogPath = null,
+        [Description("Optional absolute JSON path containing the exact sourcePath allowlist to retain.")] string? allowedSourcePathsPath = null,
         [Description("Optional PLC device/software name. Uses the first PLC when omitted.")] string? plcName = null,
         [Description("Optional path to a .ap21 project. Uses the active bound project when omitted.")] string? projectPath = null)
     {
@@ -79,7 +83,8 @@ public static class OpcUaTools
             keepFolderStructure,
             includeVariables: false,
             maxVariables: 0,
-            projectPath: projectPath).ConfigureAwait(false);
+            projectPath: projectPath,
+            allowedSourcePathsPath: allowedSourcePathsPath).ConfigureAwait(false);
 
         if (generatedPreview.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
         {
@@ -97,7 +102,9 @@ public static class OpcUaTools
             replaceExisting,
             author,
             exportPath,
-            catalogPath
+            catalogPath,
+            allowedSourcePathsPath,
+            allowedSourcePathsSha256 = ComputeFileSha256(allowedSourcePathsPath)
         };
 
         return WriteSafetyTooling.CreatePreview(
@@ -122,6 +129,7 @@ public static class OpcUaTools
         [Description("Author metadata stored on the interface.")] string? author = "TIA MCP",
         [Description("Optional absolute .xml path for a copy of the generated interface.")] string? exportPath = null,
         [Description("Optional absolute .json path for the generated NodeId catalog.")] string? catalogPath = null,
+        [Description("Optional absolute JSON path containing the exact sourcePath allowlist to retain.")] string? allowedSourcePathsPath = null,
         [Description("Optional PLC device/software name. Uses the first PLC when omitted.")] string? plcName = null,
         [Description("Optional path to a .ap21 project. Uses the active bound project when omitted.")] string? projectPath = null,
         [Description("Set true to confirm the project write.")] bool confirm = false,
@@ -143,7 +151,9 @@ public static class OpcUaTools
             replaceExisting,
             author,
             exportPath,
-            catalogPath
+            catalogPath,
+            allowedSourcePathsPath,
+            allowedSourcePathsSha256 = ComputeFileSha256(allowedSourcePathsPath)
         };
 
         var safety = await WriteSafetyTooling.ValidateForApplyAsync(
@@ -169,13 +179,27 @@ public static class OpcUaTools
             author,
             exportPath,
             catalogPath,
-            projectPath).ConfigureAwait(false);
+            projectPath,
+            allowedSourcePathsPath).ConfigureAwait(false);
         var verification = result.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)
             ? null
             : await workerClient.ListOpcUaInterfacesAsync(plcName, projectPath).ConfigureAwait(false);
 
         WriteSafetyService.Shared.AppendAudit("generate_opcua_interface", projectPath, target, requestedInput, safety.CurrentState, result);
         return WriteSafetyTooling.BuildApplyResult("generate_opcua_interface", result, "list_opcua_interfaces", verification);
+    }
+
+    private static string? ComputeFileSha256(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+        if (!Path.IsPathRooted(path) || !File.Exists(path))
+        {
+            throw new FileNotFoundException("OPC UA source-path allowlist must be an existing absolute file path.", path);
+        }
+        return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
     }
 
     [McpServerTool(Name = "preview_set_opcua_interface_enabled")]

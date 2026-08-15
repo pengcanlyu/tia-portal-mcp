@@ -27,9 +27,9 @@ Available write operations (for `preview_write_batch` / `apply_write_batch`): `u
 ### OPC UA interface tools
 
 - `list_opcua_interfaces` - list user-modelled OPC UA server interfaces and their enabled state.
-- `inspect_opcua_variables` - generate an interface in memory and report accessible global-DB variables without changing the project. By default it returns summary and per-DB counts; set `includeVariables=true` for individual NodeIds.
+- `inspect_opcua_variables` - generate an interface in memory and report accessible global-DB variables without changing the project. By default it returns summary and per-DB counts; set `includeVariables=true` for individual NodeIds. Set `allowedSourcePathsPath` to an absolute JSON allowlist when validating a minimal interface.
 - `export_opcua_interface` - export an existing interface to XML and optionally write a UTF-8 JSON NodeId catalog.
-- `preview_generate_opcua_interface` / `generate_opcua_interface` - create or transactionally replace an interface. The generator preserves each DB member's `ExternalAccessible` and `ExternalWritable` settings. It intentionally excludes PLC tag tables and instance DBs.
+- `preview_generate_opcua_interface` / `generate_opcua_interface` - create or transactionally replace an interface. The generator preserves each DB member's `ExternalAccessible` and `ExternalWritable` settings. It intentionally excludes PLC tag tables and instance DBs. `allowedSourcePathsPath` accepts either a JSON string array or an object with a `sourcePaths` array; only those exact mapped variables are retained, and preview safety binds the allowlist SHA-256.
 - `preview_set_opcua_interface_enabled` / `set_opcua_interface_enabled` - enable or disable an interface.
 - `preview_delete_opcua_interface` / `delete_opcua_interface` - delete an interface.
 

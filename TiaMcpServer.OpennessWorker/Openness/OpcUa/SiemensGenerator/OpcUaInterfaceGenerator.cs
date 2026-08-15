@@ -13,7 +13,8 @@ internal static class OpcUaInterfaceGenerator
         PlcSoftware software,
         string interfaceName,
         string interfaceUri,
-        bool keepFolderStructure)
+        bool keepFolderStructure,
+        ISet<string>? allowedSourcePaths = null)
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), "tia-mcp-opcua", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workingDirectory);
@@ -50,13 +51,16 @@ internal static class OpcUaInterfaceGenerator
             var xml = File.ReadAllText(context.FilePath);
             var variables = OpcUaNodeCatalog.Read(context.OpcUaInterface);
 
-            return new OpcUaGenerationResult(
+            var generated = new OpcUaGenerationResult(
                 xml,
                 variables,
                 context.NumberDefaultNodes,
                 context.NumberUserSystemDataTypes,
                 context.NumberGlobalDBs,
                 OpcUaGenerationLog.Messages.ToArray());
+            return allowedSourcePaths is null
+                ? generated
+                : OpcUaSourcePathFilter.Apply(generated, allowedSourcePaths);
         }
         finally
         {

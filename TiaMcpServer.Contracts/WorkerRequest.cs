@@ -98,6 +98,8 @@ public class WorkerRequest
 
     public string? CatalogPath { get; set; }
 
+    public string? AllowedSourcePathsPath { get; set; }
+
     public bool IncludeVariables { get; set; }
 
     public int MaxVariables { get; set; } = 200;

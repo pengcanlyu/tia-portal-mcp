@@ -543,7 +543,8 @@ public class OpennessWorkerClient
         bool keepFolderStructure,
         bool includeVariables,
         int maxVariables,
-        string? projectPath)
+        string? projectPath,
+        string? allowedSourcePathsPath = null)
     {
         return SendBoundProjectRequestAsync(
             "inspect_opcua_variables",
@@ -556,6 +557,7 @@ public class OpennessWorkerClient
                 request.KeepFolderStructure = keepFolderStructure;
                 request.IncludeVariables = includeVariables;
                 request.MaxVariables = maxVariables;
+                request.AllowedSourcePathsPath = allowedSourcePathsPath;
             },
             "{}");
     }
@@ -590,7 +592,8 @@ public class OpennessWorkerClient
         string? author,
         string? exportPath,
         string? catalogPath,
-        string? projectPath)
+        string? projectPath,
+        string? allowedSourcePathsPath = null)
     {
         return SendBoundProjectRequestAsync(
             "generate_opcua_interface",
@@ -606,6 +609,7 @@ public class OpennessWorkerClient
                 request.Author = author;
                 request.ExportPath = exportPath;
                 request.CatalogPath = catalogPath;
+                request.AllowedSourcePathsPath = allowedSourcePathsPath;
                 request.Confirm = true;
                 request.AllowTiaConfirmations = true;
             },

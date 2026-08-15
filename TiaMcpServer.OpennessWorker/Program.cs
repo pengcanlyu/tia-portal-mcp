@@ -419,7 +419,8 @@ internal static class Program
             request.InterfaceUri!,
             request.KeepFolderStructure,
             request.IncludeVariables,
-            request.MaxVariables)));
+            request.MaxVariables,
+            request.AllowedSourcePathsPath)));
     }
 
     private static WorkerResponse ExportOpcUaInterface(WorkerRequest request)
@@ -459,7 +460,8 @@ internal static class Program
             request.ReplaceExisting,
             request.Author,
             request.ExportPath,
-            request.CatalogPath)));
+            request.CatalogPath,
+            request.AllowedSourcePathsPath)));
     }
 
     private static WorkerResponse SetOpcUaInterfaceEnabled(WorkerRequest request)

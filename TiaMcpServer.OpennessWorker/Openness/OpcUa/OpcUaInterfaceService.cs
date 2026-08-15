@@ -35,14 +35,17 @@ internal static class OpcUaInterfaceService
         string interfaceUri,
         bool keepFolderStructure,
         bool includeVariables,
-        int maxVariables)
+        int maxVariables,
+        string? allowedSourcePathsPath)
     {
         var software = PlcSoftwareLocator.Find(project, plcName);
+        var allowedSourcePaths = OpcUaSourcePathFilter.Load(allowedSourcePathsPath);
         var generated = OpcUaInterfaceGenerator.Generate(
             software,
             interfaceName,
             interfaceUri,
-            keepFolderStructure);
+            keepFolderStructure,
+            allowedSourcePaths);
 
         return BuildGenerationInfo(interfaceName, interfaceUri, generated, includeVariables, maxVariables);
     }
@@ -93,7 +96,8 @@ internal static class OpcUaInterfaceService
         bool replaceExisting,
         string? author,
         string? exportPath,
-        string? catalogPath)
+        string? catalogPath,
+        string? allowedSourcePathsPath)
     {
         var software = PlcSoftwareLocator.Find(project, plcName);
         var composition = GetComposition(software);
@@ -105,11 +109,13 @@ internal static class OpcUaInterfaceService
                 $"OPC UA server interface '{interfaceName}' already exists. Set replaceExisting=true only after reviewing the preview.");
         }
 
+        var allowedSourcePaths = OpcUaSourcePathFilter.Load(allowedSourcePathsPath);
         var generated = OpcUaInterfaceGenerator.Generate(
             software,
             interfaceName,
             interfaceUri,
-            keepFolderStructure);
+            keepFolderStructure,
+            allowedSourcePaths);
 
         var workingDirectory = Path.Combine(Path.GetTempPath(), "tia-mcp-opcua-import", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workingDirectory);
@@ -175,6 +181,9 @@ internal static class OpcUaInterfaceService
                 author = string.IsNullOrWhiteSpace(author) ? "TIA MCP" : author,
                 exportPath = string.IsNullOrWhiteSpace(exportPath) ? null : Path.GetFullPath(exportPath!),
                 catalogPath = string.IsNullOrWhiteSpace(catalogPath) ? null : Path.GetFullPath(catalogPath!),
+                allowedSourcePathsPath = string.IsNullOrWhiteSpace(allowedSourcePathsPath)
+                    ? null
+                    : Path.GetFullPath(allowedSourcePathsPath!),
                 generation = BuildGenerationInfo(interfaceName, interfaceUri, generated, includeVariables: false, maxVariables: 0)
             };
         }
