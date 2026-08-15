@@ -8,12 +8,24 @@ namespace TiaMcpServer.OpennessWorker.Openness;
 public static class BlockImporter
 {
     private const string FileSeparatorPrefix = "--- FILE:";
+    private const string LocalFilePrefix = "@file:";
 
     public static string Import(Project project, string blockPath, string yamlContent)
     {
         if (project is null) throw new ArgumentNullException(nameof(project));
         if (blockPath is null) throw new ArgumentNullException(nameof(blockPath));
         if (yamlContent is null) throw new ArgumentNullException(nameof(yamlContent));
+
+        if (yamlContent.StartsWith(LocalFilePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            string sourcePath = yamlContent.Substring(LocalFilePrefix.Length).Trim();
+            if (!Path.IsPathRooted(sourcePath))
+            {
+                throw new ArgumentException("The @file source path must be absolute.", nameof(yamlContent));
+            }
+
+            yamlContent = File.ReadAllText(sourcePath);
+        }
 
         var address = BlockAddress.Parse(blockPath);
         var target = BlockTargetResolver.ResolveForImport(project, address);
@@ -45,7 +57,8 @@ public static class BlockImporter
         Directory.CreateDirectory(tempDir);
         try
         {
-            WriteContentToTempDir(tempDir, target.DocumentName, yamlContent);
+            string mainDocumentName = target.DocumentName + ".s7dcl";
+            WriteContentToTempDir(tempDir, mainDocumentName, yamlContent);
 
             var result = target.Group.Blocks.ImportFromDocuments(
                 new DirectoryInfo(tempDir),
