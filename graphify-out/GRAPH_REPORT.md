@@ -1,196 +1,387 @@
-# Graph Report - tia-portal-mcp  (2026-06-16)
+# Graph Report - src  (2026-08-31)
 
 ## Corpus Check
-- 83 files · ~25,951 words
+- 106 files · ~39,233 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 809 nodes · 1202 edges · 98 communities (8 shown, 90 thin omitted)
-- Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 2 edges (avg confidence: 0.8)
+- 1519 nodes · 2922 edges · 204 communities (54 shown, 48 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 161 edges (avg confidence: 0.82)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a0697dba`
+- Built from commit: `4d045e38`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- [[_COMMUNITY_Community 0|Community 0]]
-- [[_COMMUNITY_Community 1|Community 1]]
-- [[_COMMUNITY_Community 2|Community 2]]
-- [[_COMMUNITY_Community 3|Community 3]]
-- [[_COMMUNITY_Community 4|Community 4]]
-- [[_COMMUNITY_Community 5|Community 5]]
-- [[_COMMUNITY_Community 6|Community 6]]
-- [[_COMMUNITY_Community 7|Community 7]]
-- [[_COMMUNITY_Community 8|Community 8]]
-- [[_COMMUNITY_Community 9|Community 9]]
-- [[_COMMUNITY_Community 10|Community 10]]
-- [[_COMMUNITY_Community 11|Community 11]]
-- [[_COMMUNITY_Community 12|Community 12]]
-- [[_COMMUNITY_Community 13|Community 13]]
-- [[_COMMUNITY_Community 14|Community 14]]
-- [[_COMMUNITY_Community 15|Community 15]]
-- [[_COMMUNITY_Community 16|Community 16]]
-- [[_COMMUNITY_Community 17|Community 17]]
-- [[_COMMUNITY_Community 18|Community 18]]
-- [[_COMMUNITY_Community 19|Community 19]]
-- [[_COMMUNITY_Community 20|Community 20]]
-- [[_COMMUNITY_Community 21|Community 21]]
-- [[_COMMUNITY_Community 22|Community 22]]
-- [[_COMMUNITY_Community 23|Community 23]]
-- [[_COMMUNITY_Community 24|Community 24]]
-- [[_COMMUNITY_Community 25|Community 25]]
-- [[_COMMUNITY_Community 26|Community 26]]
-- [[_COMMUNITY_Community 27|Community 27]]
-- [[_COMMUNITY_Community 28|Community 28]]
-- [[_COMMUNITY_Community 29|Community 29]]
-- [[_COMMUNITY_Community 30|Community 30]]
-- [[_COMMUNITY_Community 31|Community 31]]
-- [[_COMMUNITY_Community 32|Community 32]]
-- [[_COMMUNITY_Community 33|Community 33]]
-- [[_COMMUNITY_Community 34|Community 34]]
-- [[_COMMUNITY_Community 35|Community 35]]
-- [[_COMMUNITY_Community 36|Community 36]]
-- [[_COMMUNITY_Community 37|Community 37]]
-- [[_COMMUNITY_Community 38|Community 38]]
-- [[_COMMUNITY_Community 39|Community 39]]
-- [[_COMMUNITY_Community 40|Community 40]]
-- [[_COMMUNITY_Community 41|Community 41]]
-- [[_COMMUNITY_Community 42|Community 42]]
-- [[_COMMUNITY_Community 43|Community 43]]
-- [[_COMMUNITY_Community 44|Community 44]]
-- [[_COMMUNITY_Community 45|Community 45]]
-- [[_COMMUNITY_Community 46|Community 46]]
-- [[_COMMUNITY_Community 47|Community 47]]
-- [[_COMMUNITY_Community 48|Community 48]]
-- [[_COMMUNITY_Community 49|Community 49]]
-- [[_COMMUNITY_Community 50|Community 50]]
-- [[_COMMUNITY_Community 51|Community 51]]
-- [[_COMMUNITY_Community 52|Community 52]]
-- [[_COMMUNITY_Community 53|Community 53]]
-- [[_COMMUNITY_Community 54|Community 54]]
-- [[_COMMUNITY_Community 55|Community 55]]
-- [[_COMMUNITY_Community 56|Community 56]]
-- [[_COMMUNITY_Community 57|Community 57]]
-- [[_COMMUNITY_Community 58|Community 58]]
-- [[_COMMUNITY_Community 59|Community 59]]
-- [[_COMMUNITY_Community 60|Community 60]]
-- [[_COMMUNITY_Community 61|Community 61]]
-- [[_COMMUNITY_Community 62|Community 62]]
-- [[_COMMUNITY_Community 63|Community 63]]
-- [[_COMMUNITY_Community 64|Community 64]]
-- [[_COMMUNITY_Community 65|Community 65]]
-- [[_COMMUNITY_Community 66|Community 66]]
-- [[_COMMUNITY_Community 67|Community 67]]
-- [[_COMMUNITY_Community 68|Community 68]]
-- [[_COMMUNITY_Community 69|Community 69]]
-- [[_COMMUNITY_Community 70|Community 70]]
-- [[_COMMUNITY_Community 71|Community 71]]
-- [[_COMMUNITY_Community 72|Community 72]]
-- [[_COMMUNITY_Community 73|Community 73]]
-- [[_COMMUNITY_Community 74|Community 74]]
-- [[_COMMUNITY_Community 75|Community 75]]
-- [[_COMMUNITY_Community 76|Community 76]]
-- [[_COMMUNITY_Community 77|Community 77]]
-- [[_COMMUNITY_Community 78|Community 78]]
-- [[_COMMUNITY_Community 79|Community 79]]
-- [[_COMMUNITY_Community 80|Community 80]]
-- [[_COMMUNITY_Community 81|Community 81]]
-- [[_COMMUNITY_Community 82|Community 82]]
-- [[_COMMUNITY_Community 83|Community 83]]
-- [[_COMMUNITY_Community 84|Community 84]]
-- [[_COMMUNITY_Community 85|Community 85]]
-- [[_COMMUNITY_Community 86|Community 86]]
-- [[_COMMUNITY_Community 87|Community 87]]
-- [[_COMMUNITY_Community 88|Community 88]]
-- [[_COMMUNITY_Community 89|Community 89]]
-- [[_COMMUNITY_Community 90|Community 90]]
-- [[_COMMUNITY_Community 91|Community 91]]
-- [[_COMMUNITY_Community 92|Community 92]]
-- [[_COMMUNITY_Community 93|Community 93]]
-- [[_COMMUNITY_Community 94|Community 94]]
-- [[_COMMUNITY_Community 95|Community 95]]
-- [[_COMMUNITY_Community 96|Community 96]]
-- [[_COMMUNITY_Community 97|Community 97]]
+- Local MCP Sandbox Testing
+- WorkerRequest
+- OpennessWorkerClient
+- tia-portal-mcp/TiaMcpServer.OpennessWorker/Openness/NetworkDeviceCreator.cs
+- BatchOperationRequest
+- TiaMcpServer.Tests
+- BlockAddress
+- CompileChecker
+- tia-portal-mcp/TiaMcpServer.OpennessWorker/Openness/CompileChecker.cs
+- TiaPortalSession
+- .List
+- CatalogEntryInfo
+- tia-portal-mcp/TiaMcpServer.OpennessWorker/Openness/CrossReferenceReader.cs
+- ConfigureNetworkDeviceResultInfo
+- WriteSafetyService
+- tia-portal-mcp/TiaMcpServer.OpennessWorker/Openness/EquipmentCatalogSearcher.cs
+- TagTableInfo
+- OpcUaGenerationContext
+- TagMutationResultInfo
+- tia-portal-mcp/TiaMcpServer.Tests/CrossReferenceInfoTests.cs
+- BuildXElement
+- OpcUaInterfaceService
+- tia-portal-mcp/TiaMcpServer.Contracts/BlockAddress.cs
+- ProjectTreeNode
+- tia-portal-mcp/TiaMcpServer.Tests/BlockAddressTests.cs
+- HardwareConfigReader
+- tia-portal-mcp/TiaMcpServer.Tests/HardwareConfigInfoTests.cs
+- tia-portal-mcp/TiaMcpServer.OpennessWorker/Openness/AssemblyResolver.cs
+- tia-portal-mcp/TiaMcpServer.OpennessWorker/Openness/BlockImporter.cs
+- AddDeviceResultInfo
+- ProjectSessionBinding
+- TiaMcpServer.Tests
+- tia-portal-mcp/TiaMcpServer.Tests/CatalogEntryInfoTests.cs
+- tia-portal-mcp/TiaMcpServer.Tests/CompileCheckInfoTests.cs
+- CrossReferenceReader
+- TiaMcpServer.Contracts
+- OpcUaGenerationResult
+- tia-portal-mcp
+- tia-portal-mcp/TiaMcpServer.Tests/AddDeviceResultInfoTests.cs
+- tia-portal-mcp/TiaMcpServer.Tests/CatalogTypeIdentifierTests.cs
+- tia-portal-mcp/TiaMcpServer.Tests/ConfigureNetworkDeviceResultInfoTests.cs
+- .Generate
+- AddNetworkDeviceToolTests.cs
+- ConfigureNetworkDeviceToolTests.cs
+- .FindAll
+- DeviceItemInfo
+- tia-portal-mcp/TiaMcpServer.Contracts/CatalogTypeIdentifier.cs
+- HardwareConfigInfo
+- OpcUaNodeCatalogEntry
+- CompileCheckToolTests.cs
+- SearchEquipmentCatalogToolTests.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/CrossReferenceFilterNames.cs
+- tia-portal-mcp/TiaMcpServer.OpennessWorker/Openness/BlockExporter.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/AddDeviceResultInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/CatalogEntryInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/CompileCheckReport.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/CompileMessageInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/ConfigureNetworkDeviceResultInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/CrossReferenceLocationInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/CrossReferenceReport.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/CrossReferenceSourceInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/CrossReferenceTargetInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/DeviceInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/DeviceItemInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/HardwareConfigInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/IoSystemInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/NetworkInterfaceInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/NodeInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/PlcCompileInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/PlcCrossReferenceInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/ProjectTreeNode.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/SubnetInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/TagInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/TagTableInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/UserConstantInfo.cs
+- tia-portal-mcp/TiaMcpServer.Contracts/WorkerResponse.cs
+- CrossReferenceInfoTests
+- SubnetInfo
+- NodeInfo
+- OpcUaToolTests
+- InterfaceTemplate
+- Multi-process Architecture Rationale
+- .NET 8
+- .NET Framework 4.8
+- SIEMENS_SOURCE_LICENSE.md
+- BatchToolMetadataTests
+- PlcProgramExportToolTests
+- CrossReferenceLocationInfo
+- .TryNormalize
+- CrossReferenceSourceInfo
+- CrossReferenceTargetInfo
+- PlcCrossReferenceInfo
+- CrossReferenceReport
+- DeviceInfo
+- UserConstants
+- Requirements
+- Run Locally
+- Local Package Build
+- MCP Client Configuration
+- Install
+- CrossReferenceFilterNames
+- Build From Source
 
 ## God Nodes (most connected - your core abstractions)
-1. `Program` - 37 edges
-2. `OpennessWorkerClient` - 36 edges
-3. `BatchOperationCatalogTests` - 21 edges
-4. `HardwareConfigReader` - 20 edges
-5. `CompileChecker` - 16 edges
-6. `ProjectLifecycleService` - 16 edges
-7. `TagMutationService` - 15 edges
-8. `ProjectLifecycleTools` - 14 edges
-9. `CrossReferenceReader` - 14 edges
-10. `NetworkDeviceConfigurator` - 14 edges
+1. `WorkerRequest` - 93 edges
+2. `OpennessWorkerClient` - 74 edges
+3. `TiaMcpServer.Contracts` - 58 edges
+4. `BatchOperationRequest` - 56 edges
+5. `WorkerResponse` - 47 edges
+6. `Program` - 47 edges
+7. `OpcUaGenerationContext` - 32 edges
+8. `WriteSafetyService` - 30 edges
+9. `TiaPortalSession` - 25 edges
+10. `TiaMcpServer.Tests` - 22 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `BatchOperationStatus` --references--> `string`  [EXTRACTED]
-  TiaMcpServer/Batch/BatchOperationResult.cs → TiaMcpServer.Tests/BatchSafetyTokenTests.cs
-- `WriteSafetyService` --references--> `JsonSerializerOptions`  [EXTRACTED]
-  TiaMcpServer/Safety/WriteSafetyService.cs → TiaMcpServer.OpennessWorker/Program.cs
-- `OpennessWorkerClient` --references--> `JsonSerializerOptions`  [EXTRACTED]
-  TiaMcpServer/Worker/OpennessWorkerClient.cs → TiaMcpServer.OpennessWorker/Program.cs
-- `BatchSafetySnapshot` --references--> `string`  [EXTRACTED]
-  TiaMcpServer/Batch/BatchSafetySnapshot.cs → TiaMcpServer.Tests/BatchSafetyTokenTests.cs
-- `BatchTools` --references--> `string`  [EXTRACTED]
-  TiaMcpServer/Batch/BatchTools.cs → TiaMcpServer.Tests/BatchSafetyTokenTests.cs
+- `OpennessWorkerClient` --references--> `ProjectSessionBinding`  [EXTRACTED]
+  TiaMcpServer/Worker/OpennessWorkerClient.cs → TiaMcpServer.Contracts/ProjectSessionBinding.cs
+- `CrossReferenceTargetInfo` --references--> `CrossReferenceLocationInfo`  [EXTRACTED]
+  TiaMcpServer.Contracts/CrossReferenceTargetInfo.cs → TiaMcpServer.Contracts/CrossReferenceLocationInfo.cs
+- `CrossReferenceReport` --references--> `PlcCrossReferenceInfo`  [EXTRACTED]
+  TiaMcpServer.Contracts/CrossReferenceReport.cs → TiaMcpServer.Contracts/PlcCrossReferenceInfo.cs
+- `CrossReferenceSourceInfo` --references--> `CrossReferenceTargetInfo`  [EXTRACTED]
+  TiaMcpServer.Contracts/CrossReferenceSourceInfo.cs → TiaMcpServer.Contracts/CrossReferenceTargetInfo.cs
+- `PlcCrossReferenceInfo` --references--> `CrossReferenceSourceInfo`  [EXTRACTED]
+  TiaMcpServer.Contracts/PlcCrossReferenceInfo.cs → TiaMcpServer.Contracts/CrossReferenceSourceInfo.cs
 
-## Communities (98 total, 90 thin omitted)
+## Import Cycles
+- None detected.
 
-### Community 0 - "Community 0"
-Cohesion: 0.04
-Nodes (45): Architecture, Block Paths, Build From Source, code:text (C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21), code:powershell (dotnet run --project TiaMcpServer), code:powershell ('{ "method": "browse_project_tree", "projectPath": null }' |), code:json ({"success":true,"payload":"[...]"}), code:json ({"success":false,"error":"No running TIA Portal V21 instance) (+37 more)
+## Communities (204 total, 48 thin omitted)
 
-### Community 4 - "Community 4"
-Cohesion: 0.11
-Nodes (6): BatchOperationStatus, BatchSafetySnapshot, BatchTools, string, ArchiveModeNames, ProjectSessionBinding
-
-### Community 6 - "Community 6"
-Cohesion: 0.1
-Nodes (4): TagOperationsTool, TagTableOperationsTool, TiaMcpServer.Tools, UserConstantOperationsTool
-
-### Community 7 - "Community 7"
+### Community 0 - "Local MCP Sandbox Testing"
 Cohesion: 0.15
-Nodes (5): BatchResultFormatter, JsonSerializerOptions, Invalid(), Valid(), WriteSafetyTooling
+Nodes (13): code:powershell (dotnet restore TiaMcpServer.sln), code:powershell (npx -y @modelcontextprotocol/inspector dotnet .\TiaMcpServer), code:powershell (npx -y @modelcontextprotocol/inspector dotnet .\TiaMcpServer), code:json ({}), code:json ({), code:json ({), code:json ({), code:json ({) (+5 more)
 
-### Community 10 - "Community 10"
-Cohesion: 0.19
-Nodes (7): BatchOperationCatalog, Invalid(), Valid(), int, IReadOnlyDictionary, IReadOnlyList, IReadOnlySet
+### Community 1 - "WorkerRequest"
+Cohesion: 0.05
+Nodes (62): DownloadConfiguration, DownloadProvider, WorkerRequest, AllowedSourcePathsPath, AllowTiaConfirmations, ArchiveDirectory, ArchiveMode, ArchiveName (+54 more)
 
-### Community 15 - "Community 15"
-Cohesion: 0.27
-Nodes (6): ConcurrentDictionary, Func, Invalid(), Valid(), WriteSafetyService, TimeSpan
+### Community 2 - "OpennessWorkerClient"
+Cohesion: 0.07
+Nodes (25): Process, Task, BatchWorkerInvoker, Func, JsonSerializerOptions, Task, WriteSafetyApplyContext, WriteSafetyTooling (+17 more)
 
-### Community 19 - "Community 19"
+### Community 4 - "BatchOperationRequest"
+Cohesion: 0.05
+Nodes (49): CombinedState, Error, Func, IReadOnlyList, Task, BatchExecutionEngine, BatchOperationRequest, BlockPath (+41 more)
+
+### Community 5 - "TiaMcpServer.Tests"
+Cohesion: 0.05
+Nodes (29): TiaMcpServer, TiaMcpServer.Tests, TiaMcpServer.Batch, TiaMcpServer.Tools, TiaMcpServer.Safety, TiaMcpServer.Worker, JsonElement, BatchOperationResult (+21 more)
+
+### Community 6 - "BlockAddress"
+Cohesion: 0.06
+Nodes (33): ArgumentException, Regex, IReadOnlyList, List, BlockAddress, BlockName, FolderPath, IsDeterministic (+25 more)
+
+### Community 7 - "CompileChecker"
+Cohesion: 0.06
+Nodes (32): CompilerResult, CompilerResultMessage, CompilerResultState, MethodInfo, List, CompileCheckReport, BlockPath, OverallState (+24 more)
+
+### Community 9 - "TiaPortalSession"
+Cohesion: 0.08
+Nodes (26): ConfirmationEventArgs, DateTime, EventArgs, NotificationEventArgs, ProjectArchivationMode, ProjectLifecycleResultInfo, Operation, Project (+18 more)
+
+### Community 10 - ".List"
+Cohesion: 0.09
+Nodes (17): Assembly, IReadOnlyDictionary, IReadOnlySet, ResolveEventArgs, IReadOnlyList, BatchOperationCatalog, ReadOperationNames, WriteOperationNames (+9 more)
+
+### Community 11 - "CatalogEntryInfo"
+Cohesion: 0.08
+Nodes (21): HashSet, CatalogEntryInfo, ArticleNumber, CatalogPath, Description, TypeIdentifier, TypeIdentifierNormalized, TypeName (+13 more)
+
+### Community 13 - "ConfigureNetworkDeviceResultInfo"
+Cohesion: 0.09
+Nodes (20): Dictionary, List, ConfigureNetworkDeviceResultInfo, AppliedSettings, DeviceName, Messages, SkippedSettings, Device (+12 more)
+
+### Community 15 - "WriteSafetyService"
+Cohesion: 0.09
+Nodes (24): ConcurrentDictionary, DateTimeOffset, ops, SafetyTokenEntry, states, IReadOnlyList, BatchCurrentState, BatchOperationTarget (+16 more)
+
+### Community 17 - "TagTableInfo"
+Cohesion: 0.10
+Nodes (21): TagInfo, Comment, DataType, LogicalAddress, Name, List, TagTableInfo, FolderPath (+13 more)
+
+### Community 19 - "OpcUaGenerationContext"
+Cohesion: 0.07
+Nodes (27): IDisposable, Dictionary, PlcSoftware, PlcUnit, XDocument, OpcUaGenerationContext, AccessLevelDictionary, Current (+19 more)
+
+### Community 21 - "TagMutationResultInfo"
 Cohesion: 0.22
-Nodes (4): bool, IDisposable, TiaPortalSession, TiaPortal
+Nodes (13): TagMutationResultInfo, FolderPath, Operation, PlcName, ProjectPath, Success, TableName, TagName (+5 more)
 
-### Community 41 - "Community 41"
-Cohesion: 0.29
-Nodes (7): Model Context Protocol, Siemens TIA Openness User Group, Phase 1: Implementation, Phase 2: Universal Block Support, Phase 3: Hardware and Network Discovery, Phase 4: Advanced Diagnostics, tia-portal-mcp
+### Community 23 - "BuildXElement"
+Cohesion: 0.11
+Nodes (19): PlcStruct, PlcTypeUserGroup, BuildXElement(), CreateStructElements(), IEnumerable, XElement, GetAccessLevel(), GetArrayDimensions() (+11 more)
+
+### Community 24 - "OpcUaInterfaceService"
+Cohesion: 0.20
+Nodes (9): FileInfo, OpcUaProvider, ServerInterface, ServerInterfaceComposition, IReadOnlyList, JsonSerializerOptions, PlcSoftware, Project (+1 more)
+
+### Community 26 - "ProjectTreeNode"
+Cohesion: 0.17
+Nodes (16): PlcTypeGroup, Dictionary, List, ProjectTreeNode, Children, Details, Name, NodeType (+8 more)
+
+### Community 28 - "HardwareConfigReader"
+Cohesion: 0.21
+Nodes (8): IEngineeringObject, Func, IEnumerable, NetworkInterface, Node, Project, Subnet, HardwareConfigReader
+
+### Community 33 - "AddDeviceResultInfo"
+Cohesion: 0.12
+Nodes (14): List, AddDeviceResultInfo, DeviceName, RootItemName, TypeIdentifier, Warnings, DeviceItem, Func (+6 more)
+
+### Community 34 - "ProjectSessionBinding"
+Cohesion: 0.22
+Nodes (6): ProjectSessionBinding, BoundProjectPath, Task, Program, Fact, ProjectSessionBindingTests
+
+### Community 35 - "TiaMcpServer.Tests"
+Cohesion: 0.11
+Nodes (18): net48, netstandard2.0, coverlet.collector (6.0.2), Microsoft.Extensions.Hosting (8.0.0), Microsoft.NET.Test.Sdk (17.10.0), System.Text.Json (10.0.4), xunit (2.9.0), xunit.runner.visualstudio (2.8.2) (+10 more)
+
+### Community 38 - "CrossReferenceReader"
+Cohesion: 0.17
+Nodes (10): CrossReferenceService, Location, ReferenceObject, SourceObject, CrossReferenceFilter, IEnumerable, List, PlcSoftware (+2 more)
+
+### Community 39 - "TiaMcpServer.Contracts"
+Cohesion: 0.16
+Nodes (3): TiaMcpServer.Contracts, TiaMcpServer.OpennessWorker, TiaMcpServer.OpennessWorker.Openness
+
+### Community 40 - "OpcUaGenerationResult"
+Cohesion: 0.11
+Nodes (13): TiaMcpServer.OpennessWorker.Openness.OpcUa.SiemensGenerator, TiaMcpServer.OpennessWorker.Openness.OpcUa, IReadOnlyList, OpcUaGenerationResult, DataTypeNodeCount, DefaultNodeCount, GlobalDbNodeCount, Variables (+5 more)
+
+### Community 41 - "tia-portal-mcp"
+Cohesion: 0.15
+Nodes (12): Model Context Protocol, Siemens TIA Openness User Group, Phase 1: Implementation, Phase 2: Universal Block Support, Phase 3: Hardware and Network Discovery, Phase 4: Advanced Diagnostics, Architecture, Block Paths (+4 more)
+
+### Community 45 - ".Generate"
+Cohesion: 0.17
+Nodes (8): PlcBlock, PlcBlockGroup, DataBlocksGlobal, PlcBlockGroup, PlcTagTableGroup, PlcTypeSystemGroup, ISet, PlcSoftware
+
+### Community 51 - ".FindAll"
+Cohesion: 0.20
+Nodes (11): DiscoveredPlcSoftware, SoftwareContainer, Device, DeviceItemComposition, IEnumerable, PlcSoftware, DiscoveredPlcSoftware, DeviceName (+3 more)
+
+### Community 52 - "DeviceItemInfo"
+Cohesion: 0.16
+Nodes (11): List, DeviceItemInfo, Address, Items, Name, NetworkInterfaces, PositionNumber, TypeIdentifier (+3 more)
+
+### Community 54 - "HardwareConfigInfo"
+Cohesion: 0.24
+Nodes (7): List, HardwareConfigInfo, Devices, Subnets, Fact, JsonSerializerOptions, HardwareConfigInfoTests
+
+### Community 55 - "OpcUaNodeCatalogEntry"
+Cohesion: 0.15
+Nodes (12): IReadOnlyList, XDocument, OpcUaNodeCatalog, OpcUaNodeCatalogEntry, AccessLevel, BrowseName, DataType, DisplayName (+4 more)
+
+### Community 90 - "CrossReferenceInfoTests"
+Cohesion: 0.31
+Nodes (3): Fact, JsonSerializerOptions, CrossReferenceInfoTests
+
+### Community 91 - "SubnetInfo"
+Cohesion: 0.15
+Nodes (11): List, IoSystemInfo, ConnectedDeviceNames, IoControllerName, Name, List, SubnetInfo, ConnectedNodeNames (+3 more)
+
+### Community 92 - "NodeInfo"
+Cohesion: 0.15
+Nodes (11): List, NetworkInterfaceInfo, Name, Nodes, NodeInfo, IoSystemName, IpAddress, Name (+3 more)
+
+### Community 93 - "OpcUaToolTests"
+Cohesion: 0.23
+Nodes (8): DescriptionAttribute, Fact, InlineData, McpServerToolAttribute, McpServerToolTypeAttribute, Task, Theory, OpcUaToolTests
+
+### Community 94 - "InterfaceTemplate"
+Cohesion: 0.20
+Nodes (7): Stream, IEnumerable, List, XElement, InterfaceTemplate, TagTableDataTypes, TemplateDataTypes
+
+### Community 98 - "SIEMENS_SOURCE_LICENSE.md"
+Cohesion: 0.18
+Nodes (10): 1.1 Use of the Software, 1.2 Security information, 1.3 Compliance with Export Control Regulations, 1. General information: Software in source code and object code, 2. Open Source License for Software in source code and generated source code, 3.1 License Grant, 3.2 Included third-party software components, 3.3 Disclaimer of liability (+2 more)
+
+### Community 99 - "BatchToolMetadataTests"
+Cohesion: 0.33
+Nodes (5): DescriptionAttribute, Fact, InlineData, Theory, BatchToolMetadataTests
+
+### Community 100 - "PlcProgramExportToolTests"
+Cohesion: 0.24
+Nodes (7): DescriptionAttribute, Fact, InlineData, McpServerToolAttribute, Task, Theory, PlcProgramExportToolTests
+
+### Community 101 - "CrossReferenceLocationInfo"
+Cohesion: 0.20
+Nodes (9): CrossReferenceLocationInfo, Access, Address, Name, ReferencedAs, ReferencedAsName, ReferenceLocation, ReferenceType (+1 more)
+
+### Community 102 - ".TryNormalize"
+Cohesion: 0.33
+Nodes (3): ArchiveModeNames, Fact, ArchiveModeNamesTests
+
+### Community 103 - "CrossReferenceSourceInfo"
+Cohesion: 0.22
+Nodes (8): List, CrossReferenceSourceInfo, Address, Children, Name, Path, References, TypeName
+
+### Community 104 - "CrossReferenceTargetInfo"
+Cohesion: 0.22
+Nodes (8): List, CrossReferenceTargetInfo, Address, Device, Locations, Name, Path, TypeName
+
+### Community 105 - "PlcCrossReferenceInfo"
+Cohesion: 0.22
+Nodes (8): List, PlcCrossReferenceInfo, LocationCount, Messages, PlcName, ReferenceCount, SourceCount, Sources
+
+### Community 106 - "CrossReferenceReport"
+Cohesion: 0.25
+Nodes (7): List, CrossReferenceReport, Filter, Plcs, TotalLocationCount, TotalReferenceCount, TotalSourceCount
+
+### Community 107 - "DeviceInfo"
+Cohesion: 0.33
+Nodes (5): List, DeviceInfo, Items, Name, TypeIdentifier
+
+### Community 108 - "UserConstants"
+Cohesion: 0.47
+Nodes (3): Dictionary, PlcTagTableGroup, UserConstants
+
+### Community 109 - "Requirements"
+Cohesion: 0.40
+Nodes (5): code:text (C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21), code:powershell (dotnet build TiaMcpServer.sln -m:1 /p:UseTiaPortalReferenceS), code:powershell (dotnet build TiaMcpServer.sln -m:1 /p:UseTiaPortalReferenceS), code:text (TIA Openness compile references: C:\Program Files\Siemens\Au), Requirements
+
+### Community 110 - "Run Locally"
+Cohesion: 0.40
+Nodes (5): code:powershell (dotnet run --project TiaMcpServer), code:powershell ('{ "method": "browse_project_tree", "projectPath": null }' |), code:json ({"success":true,"payload":"[...]"}), code:json ({"success":false,"error":"No running TIA Portal V21 instance), Run Locally
+
+### Community 111 - "Local Package Build"
+Cohesion: 0.40
+Nodes (5): code:powershell (dotnet pack TiaMcpServer\TiaMcpServer.csproj -c Release), code:powershell (dotnet tool install -g TiaMcpServer --add-source .\TiaMcpSer), code:powershell (tia-mcp), code:powershell (tia-mcp --project C:\Projects\Line.ap21), Local Package Build
+
+### Community 112 - "MCP Client Configuration"
+Cohesion: 0.50
+Nodes (4): code:json ({), code:json ({), code:json ({), MCP Client Configuration
+
+### Community 113 - "Install"
+Cohesion: 0.50
+Nodes (4): code:powershell (dotnet tool install -g TiaMcpServer), code:powershell (tia-mcp), code:powershell (tia-mcp --project C:\Projects\Line.ap21), Install
+
+### Community 114 - "CrossReferenceFilterNames"
+Cohesion: 0.50
+Nodes (3): IReadOnlyList, CrossReferenceFilterNames, Default
+
+### Community 115 - "Build From Source"
+Cohesion: 0.67
+Nodes (3): Build From Source, code:powershell (dotnet restore TiaMcpServer.sln), code:text (TiaMcpServer\bin\Debug\net8.0\openness-worker)
 
 ## Knowledge Gaps
-- **63 isolated node(s):** `int`, `IReadOnlyList`, `IReadOnlyDictionary`, `IReadOnlySet`, `BatchOperationRequest` (+58 more)
-  These have ≤1 connection - possible missing edges or undocumented components.
-- **90 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **380 isolated node(s):** `DeviceName`, `RootItemName`, `TypeIdentifier`, `Warnings`, `PlcName` (+375 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 688 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **48 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `JsonSerializerOptions` connect `Community 7` to `Community 1`, `Community 2`, `Community 15`?**
-  _High betweenness centrality (0.014) - this node is a cross-community bridge._
-- **Why does `OpennessWorkerClient` connect `Community 2` to `Community 15`, `Community 7`?**
-  _High betweenness centrality (0.012) - this node is a cross-community bridge._
-- **Why does `Program` connect `Community 1` to `Community 7`?**
-  _High betweenness centrality (0.010) - this node is a cross-community bridge._
-- **What connects `int`, `IReadOnlyList`, `IReadOnlyDictionary` to the rest of the system?**
-  _63 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Community 0` be split into smaller, more focused modules?**
-  _Cohesion score 0.04 - nodes in this community are weakly interconnected._
-- **Should `Community 2` be split into smaller, more focused modules?**
-  _Cohesion score 0.13 - nodes in this community are weakly interconnected._
-- **Should `Community 4` be split into smaller, more focused modules?**
-  _Cohesion score 0.11 - nodes in this community are weakly interconnected._
+- **Why does `TiaMcpServer.Contracts` connect `TiaMcpServer.Contracts` to `TiaMcpServer.Tests`, `BlockAddress`, `CompileChecker`, `TiaPortalSession`, `CatalogEntryInfo`, `ConfigureNetworkDeviceResultInfo`, `TagTableInfo`, `TagMutationResultInfo`, `ProjectTreeNode`, `AddDeviceResultInfo`, `ProjectSessionBinding`, `DeviceItemInfo`, `HardwareConfigInfo`, `CrossReferenceInfoTests`, `SubnetInfo`, `NodeInfo`, `CrossReferenceLocationInfo`, `.TryNormalize`, `CrossReferenceSourceInfo`, `CrossReferenceTargetInfo`, `PlcCrossReferenceInfo`, `CrossReferenceReport`, `DeviceInfo`, `CrossReferenceFilterNames`?**
+  _High betweenness centrality (0.235) - this node is a cross-community bridge._
+- **Why does `OpennessWorkerClient` connect `OpennessWorkerClient` to `ProjectSessionBinding`, `BatchOperationRequest`, `TiaMcpServer.Tests`?**
+  _High betweenness centrality (0.098) - this node is a cross-community bridge._
+- **Why does `WorkerRequest` connect `WorkerRequest` to `OpennessWorkerClient`, `CrossReferenceReader`, `TiaMcpServer.Contracts`?**
+  _High betweenness centrality (0.083) - this node is a cross-community bridge._
+- **What connects `DeviceName`, `RootItemName`, `TypeIdentifier` to the rest of the system?**
+  _380 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `WorkerRequest` be split into smaller, more focused modules?**
+  _Cohesion score 0.052650494159928125 - nodes in this community are weakly interconnected._
+- **Should `OpennessWorkerClient` be split into smaller, more focused modules?**
+  _Cohesion score 0.06796116504854369 - nodes in this community are weakly interconnected._
+- **Should `BatchOperationRequest` be split into smaller, more focused modules?**
+  _Cohesion score 0.052313883299798795 - nodes in this community are weakly interconnected._
