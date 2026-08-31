@@ -2,11 +2,11 @@
 
 MCP server for Siemens SIMATIC TIA Portal V21. It lets MCP clients and AI agents inspect a running TIA Portal project through the Siemens Openness API.
 
-The current implementation covers project discovery and lifecycle operations, PLC block export/import, tag table reads and guarded tag mutations, hardware/network discovery, cross-reference diagnostics, hardware catalog search, guarded network-device provisioning, compile/check diagnostics, and OPC UA user-modelled server-interface generation.
+The current implementation covers project discovery and lifecycle operations, PLC block export/import, complete PLC program-folder export for SIMATIC Automation Tool, tag table reads and guarded tag mutations, hardware/network discovery, cross-reference diagnostics, hardware catalog search, guarded network-device provisioning, compile/check diagnostics, and OPC UA user-modelled server-interface generation.
 
 ## Tools
 
-The server currently exposes 25 tools.
+The server currently exposes 27 tools.
 
 ### Batch operations
 
@@ -23,6 +23,10 @@ Available write operations (for `preview_write_batch` / `apply_write_batch`): `u
 
 - `get_project_status` - read active project metadata.
 - `preview_open_project` / `preview_create_project` / `preview_save_project` / `preview_save_project_as` / `preview_archive_project` / `preview_close_project` plus matching write tools - project lifecycle operations. These stay single-tool only (not batchable). Writes require `confirm=true` and `safetyToken`.
+
+### PLC program export
+
+- `preview_export_plc_to_folder` / `export_plc_to_folder` - export complete PLC hardware and software to a new Windows folder containing `SIMATIC.S7S` and `S7_JOB.S7S`. The result can be passed to SIMATIC Automation Tool `ProgramUpdate`. The operation does not connect to or download a PLC. Existing output paths are rejected, and apply requires `confirm=true` plus the preview `safetyToken`.
 
 ### OPC UA interface tools
 
@@ -194,7 +198,7 @@ npx -y @modelcontextprotocol/inspector dotnet .\TiaMcpServer\bin\Debug\net8.0\Ti
 In the Inspector UI:
 
 - Open the Tools tab.
-- Click `List Tools` and verify the 16 tools appear.
+- Click `List Tools` and verify the 27 tools appear.
 - Start with reads: call `execute_read_batch` with an `operations` array (each item has an `operationId`, an `operation` name such as `browse_project_tree` / `list_tag_tables` / `read_hardware_config` / `read_cross_references` / `compile_check`, and that operation's parameters).
 - Use a `search_equipment_catalog` read item before hardware insertion so you can copy an exact `typeIdentifier`.
 - Use a `get_block_content` read item on a block path returned by `browse_project_tree`.

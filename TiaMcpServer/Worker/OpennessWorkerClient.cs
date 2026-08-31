@@ -151,6 +151,24 @@ public class OpennessWorkerClient
             "{}");
     }
 
+    public Task<string> ExportPlcToFolderAsync(
+        string deviceName,
+        string exportPath,
+        string? projectPath)
+    {
+        return SendBoundProjectRequestAsync(
+            "export_plc_to_folder",
+            projectPath,
+            request =>
+            {
+                request.DeviceName = deviceName;
+                request.ExportPath = exportPath;
+                request.Confirm = true;
+                request.AllowTiaConfirmations = true;
+            },
+            "{}");
+    }
+
     public Task<string> CreateTagTableAsync(
         string? plcName,
         string tableName,

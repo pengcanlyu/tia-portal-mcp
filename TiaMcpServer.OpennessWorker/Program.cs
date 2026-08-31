@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Siemens.Engineering;
+using Siemens.Engineering.Download;
+using Siemens.Engineering.Download.Configurations;
+using Siemens.Engineering.HW;
 using TiaMcpServer.Contracts;
 using TiaMcpServer.OpennessWorker.Openness;
 using TiaMcpServer.OpennessWorker.Openness.OpcUa;
@@ -62,6 +65,7 @@ internal static class Program
                 "update_block_logic"  => UpdateBlockLogic(request),
                 "list_tag_tables"     => ListTagTables(request),
                 "compile_check"       => CompileCheck(request),
+                "export_plc_to_folder" => ExportPlcToFolder(request),
                 "create_tag_table"    => CreateTagTable(request),
                 "delete_tag_table"    => DeleteTagTable(request),
                 "create_tag"          => CreateTag(request),
@@ -224,6 +228,127 @@ internal static class Program
     private static WorkerResponse CompileCheck(WorkerRequest request)
     {
         return WithProject(request, project => Success(CompileChecker.Compile(project, request.PlcName, request.BlockPath)));
+    }
+
+    private static WorkerResponse ExportPlcToFolder(WorkerRequest request)
+    {
+        if (!request.Confirm)
+        {
+            return Failure("Operation not confirmed. Set confirm=true to export the PLC program to a folder.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DeviceName) || string.IsNullOrWhiteSpace(request.ExportPath))
+        {
+            return Failure("DeviceName and ExportPath are required.");
+        }
+
+        return WithProject(request, project =>
+        {
+            var device = project.Devices.Find(request.DeviceName!);
+            if (device is null)
+            {
+                var availableDevices = project.Devices.Select(candidate => candidate.Name).ToArray();
+                return Failure($"Device '{request.DeviceName}' was not found. Available devices: {string.Join(", ", availableDevices)}");
+            }
+
+            var fullPath = Path.GetFullPath(request.ExportPath!);
+            var outputDirectory = new DirectoryInfo(fullPath);
+            if (outputDirectory.Exists)
+            {
+                return Failure($"Export directory already exists: {fullPath}");
+            }
+
+            var downloadProvider = FindDownloadProvider(device.DeviceItems);
+            if (downloadProvider is null)
+            {
+                return Failure($"No PLC DownloadProvider was found below device '{device.Name}'.");
+            }
+
+            outputDirectory.Create();
+            var downloadResult = downloadProvider.Download(outputDirectory, ConfigureFolderDownload);
+
+            FileInfo[] files = Array.Empty<FileInfo>();
+            for (var attempt = 0; attempt < 20 && files.Length == 0; attempt++)
+            {
+                outputDirectory.Refresh();
+                files = outputDirectory.Exists
+                    ? outputDirectory.EnumerateFiles("*", SearchOption.AllDirectories).ToArray()
+                    : Array.Empty<FileInfo>();
+                if (files.Length == 0)
+                {
+                    Thread.Sleep(100);
+                }
+            }
+
+            var simaticFolder = outputDirectory
+                .EnumerateDirectories("SIMATIC.S7S", SearchOption.AllDirectories)
+                .FirstOrDefault();
+
+            return Success(new
+            {
+                DeviceName = device.Name,
+                ExportPath = outputDirectory.FullName,
+                ResultState = downloadResult.State.ToString(),
+                downloadResult.ErrorCount,
+                downloadResult.WarningCount,
+                Messages = downloadResult.Messages.Select(message => new
+                {
+                    State = message.State.ToString(),
+                    message.Message,
+                    message.ErrorCount,
+                    message.WarningCount
+                }).ToArray(),
+                FileCount = files.Length,
+                SizeBytes = files.Sum(file => file.Length),
+                SimaticS7sPath = simaticFolder?.FullName
+            });
+        });
+    }
+
+    private static DownloadProvider? FindDownloadProvider(DeviceItemComposition items)
+    {
+        foreach (DeviceItem item in items)
+        {
+            try
+            {
+                var provider = ((IEngineeringServiceProvider)item).GetService<DownloadProvider>();
+                if (provider is not null)
+                {
+                    return provider;
+                }
+            }
+            catch (EngineeringException)
+            {
+                // Unsupported device items do not provide PLC download services.
+            }
+
+            var nestedProvider = FindDownloadProvider(item.DeviceItems);
+            if (nestedProvider is not null)
+            {
+                return nestedProvider;
+            }
+        }
+
+        return null;
+    }
+
+    private static void ConfigureFolderDownload(DownloadConfiguration configuration)
+    {
+        switch (configuration)
+        {
+            case TargetForSoftware targetForSoftware:
+                targetForSoftware.CurrentSelection = TargetForSoftwareSelections.CPU;
+                break;
+            case OverwriteOnMemoryCard overwriteOnMemoryCard:
+                overwriteOnMemoryCard.CurrentSelection = OverwriteOnMemoryCardSelections.Load;
+                break;
+            case ConsistentBlocksDownload consistentBlocksDownload:
+                consistentBlocksDownload.CurrentSelection = ConsistentBlocksDownloadSelections.ConsistentDownload;
+                break;
+            case AlarmTextLibrariesDownload alarmTextLibrariesDownload:
+                alarmTextLibrariesDownload.CurrentSelection = AlarmTextLibrariesDownloadSelections.ConsistentDownload;
+                break;
+        }
     }
 
     private static WorkerResponse CreateTagTable(WorkerRequest request)
