@@ -657,7 +657,11 @@ public static class NetworkPayloadContract
         {
             case NetworkObjectKinds.DeviceItem:
                 RequireSelectorText(target.DeviceName, $"{prefix}.deviceName", target.Kind);
-                RequireSelectorPath(target, prefix, target.Kind);
+                RequireSelectorPath(
+                    target,
+                    prefix,
+                    target.Kind,
+                    allowMissingTypeIdentifier: true);
                 RejectSelectorFields(target, prefix, target.Kind,
                     interfaceFields: true, nodeField: true, subnetField: true,
                     numberField: true, ioSystemFields: true, connectionFields: true);
@@ -761,7 +765,11 @@ public static class NetworkPayloadContract
         }
     }
 
-    private static void RequireSelectorPath(NetworkObjectSelectorInfo target, string prefix, string kind)
+    private static void RequireSelectorPath(
+        NetworkObjectSelectorInfo target,
+        string prefix,
+        string kind,
+        bool allowMissingTypeIdentifier = false)
     {
         if (target.ItemPath is null || target.ItemPath.Count == 0)
         {
@@ -782,7 +790,16 @@ public static class NetworkPayloadContract
                 throw new JsonException($"'{prefix}.itemPath[].positionNumber' must not be negative.");
             }
 
-            RequireSelectorText(segment.TypeIdentifier, $"{prefix}.itemPath[].typeIdentifier", kind);
+            if (segment.TypeIdentifier is null
+                || (!allowMissingTypeIdentifier && string.IsNullOrWhiteSpace(segment.TypeIdentifier))
+                || (allowMissingTypeIdentifier
+                    && segment.TypeIdentifier.Length > 0
+                    && string.IsNullOrWhiteSpace(segment.TypeIdentifier)))
+            {
+                throw new JsonException(allowMissingTypeIdentifier
+                    ? $"'{prefix}.itemPath[].typeIdentifier' must be empty or nonblank for kind '{kind}'."
+                    : $"'{prefix}.itemPath[].typeIdentifier' is required for kind '{kind}'.");
+            }
         }
     }
 

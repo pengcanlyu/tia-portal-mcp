@@ -486,7 +486,15 @@ public static class NetworkOperationCatalog
             }
         }
 
-        ValidateSelectorValues(target, prefix, errors);
+        ValidateSelectorValues(
+            target,
+            prefix,
+            errors,
+            allowMissingTypeIdentifier: string.Equals(
+                operationName,
+                "inspect_network_object",
+                StringComparison.Ordinal)
+                && string.Equals(target.Kind, NetworkObjectKinds.DeviceItem, StringComparison.Ordinal));
 
         // Inapplicable selector fields.
         foreach (var (name, isSet) in AllSelectorFields)
@@ -543,7 +551,8 @@ public static class NetworkOperationCatalog
     private static void ValidateSelectorValues(
         NetworkObjectTarget target,
         string prefix,
-        List<string> errors)
+        List<string> errors,
+        bool allowMissingTypeIdentifier)
     {
         if (target.ItemPath is { } itemPath)
         {
@@ -585,9 +594,16 @@ public static class NetworkOperationCatalog
                     errors.Add($"{segmentPrefix}.positionNumber' must not be negative.");
                 }
 
-                if (string.IsNullOrWhiteSpace(segment.TypeIdentifier))
+                if (segment.TypeIdentifier is null
+                    || (!allowMissingTypeIdentifier
+                        && string.IsNullOrWhiteSpace(segment.TypeIdentifier))
+                    || (allowMissingTypeIdentifier
+                        && segment.TypeIdentifier.Length > 0
+                        && string.IsNullOrWhiteSpace(segment.TypeIdentifier)))
                 {
-                    errors.Add($"{segmentPrefix}.typeIdentifier' is required and must be nonblank.");
+                    errors.Add(allowMissingTypeIdentifier
+                        ? $"{segmentPrefix}.typeIdentifier' must be empty or nonblank."
+                        : $"{segmentPrefix}.typeIdentifier' is required and must be nonblank.");
                 }
             }
         }

@@ -228,7 +228,7 @@ public static class HardwareConfigReader
     {
         var itemName = ReadTypedIdentityString(() => item.Name, "Device item name");
         var itemDescription = itemName.IsUsable ? itemName.Value : "(unnamed)";
-        var typeIdentifier = ReadTypedIdentityString(
+        var typeIdentifier = ReadOptionalTypeIdentifier(
             () => item.TypeIdentifier,
             $"Device item '{itemDescription}' type identifier");
         var positionNumber = ReadTypedIdentityInt(
@@ -256,7 +256,9 @@ public static class HardwareConfigReader
         var itemInfo = new DeviceItemInfo
         {
             Name = itemName.IsUsable ? itemName.Value : null,
-            TypeIdentifier = typeIdentifier.IsUsable ? typeIdentifier.Value : null,
+            TypeIdentifier = typeIdentifier.IsUsable && typeIdentifier.Value.Length > 0
+                ? typeIdentifier.Value
+                : null,
             PositionNumber = positionNumber.IsUsable ? positionNumber.Value : null,
             Address = ReadExactStringAttribute(
                 (IEngineeringObject)item,
@@ -345,7 +347,10 @@ public static class HardwareConfigReader
             "Name",
             "network interface name",
             messages);
-        var selectorDiagnostics = CombineDiagnostics(itemPathDiagnostics, deviceName.Diagnostic);
+        var selectorDiagnostics = CombineDiagnostics(
+            itemPathDiagnostics,
+            deviceName.Diagnostic,
+            MissingPathTypeIdentifierDiagnostic(itemPath));
         var interfaceInfo = new NetworkInterfaceInfo
         {
             Name = interfaceName ?? string.Empty,
@@ -671,6 +676,26 @@ public static class HardwareConfigReader
             return NetworkObjectDiscoveryEvidence.UnreadableString(field);
         }
     }
+
+    private static NetworkObjectDiscoveryEvidenceValue<string> ReadOptionalTypeIdentifier(
+        Func<string?> read,
+        string field)
+    {
+        try
+        {
+            return NetworkObjectDiscoveryEvidence.ReadOptionalStringIdentity(read(), field);
+        }
+        catch (EngineeringException)
+        {
+            return NetworkObjectDiscoveryEvidence.UnreadableString(field);
+        }
+    }
+
+    private static string MissingPathTypeIdentifierDiagnostic(
+        IEnumerable<DeviceItemPathSegmentInfo> itemPath)
+        => itemPath.Any(segment => string.IsNullOrEmpty(segment.TypeIdentifier))
+            ? "A device item path type identifier was unavailable; non-device selectors are not available."
+            : string.Empty;
 
     private static NetworkObjectDiscoveryEvidenceValue<int> ReadTypedIdentityInt(
         Func<int> read,

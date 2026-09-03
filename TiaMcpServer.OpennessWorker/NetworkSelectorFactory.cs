@@ -16,8 +16,9 @@ namespace TiaMcpServer.OpennessWorker;
 ///
 /// <para>
 /// Rejection rules: a blank (null/whitespace) required string or incomplete/negative path
-/// evidence causes an <see cref="ArgumentException"/>. An empty item-path list is also rejected
-/// because an empty path provides no evidence for device-item resolution.
+/// evidence causes an <see cref="ArgumentException"/>. Device-item selectors alone may carry an
+/// empty type identifier when TIA does not expose it; index, name, and position remain mandatory.
+/// An empty item-path list is also rejected because it provides no resolution evidence.
 /// </para>
 /// </summary>
 public static class NetworkSelectorFactory
@@ -30,7 +31,7 @@ public static class NetworkSelectorFactory
     /// <param name="itemPath">
     /// Ordered segments from the root of the device item composition to the target item.
     /// Must be non-empty; every segment must contain a non-negative index and position plus
-    /// non-blank name and type-identifier evidence.
+    /// non-blank name evidence. Type-identifier evidence may be empty when TIA omits it.
     /// </param>
     public static NetworkObjectSelectorInfo DeviceItem(
         string deviceName,
@@ -38,7 +39,7 @@ public static class NetworkSelectorFactory
     {
         RequireNonBlank(deviceName, nameof(deviceName));
         RequireNonEmptyPath(itemPath);
-        ValidateSegments(itemPath);
+        ValidateSegments(itemPath, requireTypeIdentifier: false);
 
         return new NetworkObjectSelectorInfo
         {
@@ -61,7 +62,7 @@ public static class NetworkSelectorFactory
     {
         RequireNonBlank(deviceName, nameof(deviceName));
         RequireNonEmptyPath(itemPath);
-        ValidateSegments(itemPath);
+        ValidateSegments(itemPath, requireTypeIdentifier: true);
 
         return new NetworkObjectSelectorInfo
         {
@@ -92,7 +93,7 @@ public static class NetworkSelectorFactory
         if (itemPath is not null)
         {
             RequireNonEmptyPath(itemPath);
-            ValidateSegments(itemPath);
+            ValidateSegments(itemPath, requireTypeIdentifier: true);
         }
         if (nodeIndex < 0)
         {
@@ -194,7 +195,9 @@ public static class NetworkSelectorFactory
         }
     }
 
-    private static void ValidateSegments(IReadOnlyList<DeviceItemPathSegmentInfo> itemPath)
+    private static void ValidateSegments(
+        IReadOnlyList<DeviceItemPathSegmentInfo> itemPath,
+        bool requireTypeIdentifier)
     {
         for (int i = 0; i < itemPath.Count; i++)
         {
@@ -229,10 +232,16 @@ public static class NetworkSelectorFactory
                     nameof(itemPath));
             }
 
-            if (string.IsNullOrWhiteSpace(segment.TypeIdentifier))
+            if (segment.TypeIdentifier is null
+                || (requireTypeIdentifier && string.IsNullOrWhiteSpace(segment.TypeIdentifier))
+                || (!requireTypeIdentifier
+                    && segment.TypeIdentifier.Length > 0
+                    && string.IsNullOrWhiteSpace(segment.TypeIdentifier)))
             {
                 throw new ArgumentException(
-                    $"Segment at position {i} must contain a non-blank TypeIdentifier.",
+                    requireTypeIdentifier
+                        ? $"Segment at position {i} must contain a non-blank TypeIdentifier."
+                        : $"Segment at position {i} TypeIdentifier must be empty or non-blank.",
                     nameof(itemPath));
             }
         }

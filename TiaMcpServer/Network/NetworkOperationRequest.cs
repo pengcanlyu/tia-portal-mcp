@@ -107,7 +107,7 @@ public sealed class NetworkObjectTarget
     [Description("Exact device name. Required for deviceItem, networkInterface, node, and communicationConnection kinds.")]
     public string? DeviceName { get; set; }
 
-    [Description("Path through the device item hierarchy. Required and non-empty for deviceItem, networkInterface, and communicationConnection kinds; every segment requires a non-negative index and positionNumber plus nonblank name and typeIdentifier.")]
+    [Description("Path through the device item hierarchy. Required and non-empty for deviceItem, networkInterface, and communicationConnection kinds; every segment requires a non-negative index and positionNumber plus a nonblank name. For deviceItem inspection only, typeIdentifier may be empty when TIA does not expose it; all other path evidence remains mandatory.")]
     public IReadOnlyList<NetworkDeviceItemPathSegment>? ItemPath { get; set; }
 
     [Description("Optional captured evidence for networkInterface kind; must be nonblank when supplied.")]
@@ -172,7 +172,7 @@ public sealed class NetworkDeviceItemPathSegment
     [Description("Position number of the module at this level of the device hierarchy.")]
     public int? PositionNumber { get; set; }
 
-    [Description("Type identifier of the module at this level of the device hierarchy.")]
+    [Description("Type identifier of the module at this level of the device hierarchy. May be empty only for inspect_network_object with kind=deviceItem when TIA does not expose it.")]
     public string TypeIdentifier { get; set; } = string.Empty;
 }
 

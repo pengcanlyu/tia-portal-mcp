@@ -39,6 +39,21 @@ public class NetworkIntrospectionWorkerDispatchTests
     }
 
     [Fact]
+    public void DeviceItemInspection_EnumeratesTypedChannelsWithoutAddingWriteBehavior()
+    {
+        var inspectorSource = File.ReadAllText(FindRepositoryFile(
+            "TiaMcpServer.OpennessWorker", "Openness", "NetworkObjectInspector.cs"));
+        var channelSource = File.ReadAllText(FindRepositoryFile(
+            "TiaMcpServer.OpennessWorker", "Openness", "DeviceItemChannelInspector.cs"));
+
+        Assert.Contains("DeviceItemChannelInspector.Inspect(deviceItem)", inspectorSource);
+        Assert.Contains("foreach (Channel channel in deviceItem.Channels)", channelSource);
+        Assert.Contains("EngineeringAttributeInspector.Inspect((IEngineeringObject)channel, null)", channelSource);
+        Assert.Contains("Channels[{channelIndex}]", channelSource);
+        Assert.DoesNotContain("SetAttribute", channelSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SelectorResolver_UsesTypedTraversalAndStableSelectionCategories()
     {
         var source = File.ReadAllText(FindRepositoryFile(
