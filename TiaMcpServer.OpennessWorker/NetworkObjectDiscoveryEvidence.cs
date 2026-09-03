@@ -31,6 +31,27 @@ internal sealed class NetworkObjectDiscoveryEvidenceValue<T>
 
 internal static class NetworkObjectDiscoveryEvidence
 {
+    public static NetworkObjectDiscoveryEvidenceValue<string> ReadOptionalStringIdentity(
+        object? value,
+        string field)
+    {
+        if (value is null)
+        {
+            return NetworkObjectDiscoveryEvidenceValue<string>.Usable(string.Empty, "missing");
+        }
+
+        if (value is not string text)
+        {
+            return NetworkObjectDiscoveryEvidenceValue<string>.Unusable(
+                $"{field} had an unexpected CLR type; selector not available.",
+                "wrongType");
+        }
+
+        return string.IsNullOrWhiteSpace(text)
+            ? NetworkObjectDiscoveryEvidenceValue<string>.Usable(string.Empty, "missing")
+            : NetworkObjectDiscoveryEvidenceValue<string>.Usable(text, "value:" + text);
+    }
+
     public static NetworkObjectDiscoveryEvidenceValue<string> ReadString(object? value, string field)
     {
         if (value is null)

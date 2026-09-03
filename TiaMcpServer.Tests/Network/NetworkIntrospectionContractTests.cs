@@ -587,6 +587,17 @@ public class NetworkIntrospectionContractTests
         Assert.Contains("positionNumber", result.Error);
     }
 
+    [Fact]
+    public void InspectDeviceItem_MissingTypeIdentifierFromTiaChildItem_IsAccepted()
+    {
+        var target = Phase3Fixtures.ValidTarget(NetworkObjectKinds.DeviceItem);
+        Assert.Single(target.ItemPath!).TypeIdentifier = string.Empty;
+
+        var result = NetworkOperationCatalog.ValidateRead(new[] { InspectOp(target: target) });
+
+        Assert.True(result.IsValid, result.Error);
+    }
+
     [Theory]
     [InlineData(NetworkObjectKinds.IoSystem, "number")]
     [InlineData(NetworkObjectKinds.CommunicationConnection, "connectionIndex")]

@@ -77,7 +77,9 @@ public static class NetworkObjectIndexReader
         {
             var itemName = ReadTypedString(() => item.Name, "Device item name");
             var positionNumber = ReadTypedInt(() => item.PositionNumber, "Device item position number");
-            var typeIdentifier = ReadTypedString(() => item.TypeIdentifier, "Device item type identifier");
+            var typeIdentifier = ReadOptionalTypeIdentifier(
+                () => item.TypeIdentifier,
+                "Device item type identifier");
             var segment = new DeviceItemPathSegmentInfo
             {
                 Index = siblingIndex,
@@ -106,7 +108,9 @@ public static class NetworkObjectIndexReader
                         new NetworkObjectEvidenceInfo
                         {
                             Name = itemName.IsUsable ? itemName.Value : null,
-                            TypeIdentifier = typeIdentifier.IsUsable ? typeIdentifier.Value : null,
+                            TypeIdentifier = typeIdentifier.IsUsable && typeIdentifier.Value.Length > 0
+                                ? typeIdentifier.Value
+                                : null,
                             PositionNumber = positionNumber.IsUsable ? positionNumber.Value : null,
                             DeviceItemPath = itemPath.Select(pathSegment => pathSegment.Name).ToList(),
                         },
@@ -186,7 +190,8 @@ public static class NetworkObjectIndexReader
         {
             var diagnostics = CombineDiagnostics(
                 itemPathDiagnostics,
-                deviceName.Diagnostic);
+                deviceName.Diagnostic,
+                MissingPathTypeIdentifierDiagnostic(itemPath));
             var selector = diagnostics.Count == 0
                 ? NetworkSelectorFactory.NetworkInterface(
                     deviceName.Value,
@@ -222,7 +227,8 @@ public static class NetworkObjectIndexReader
             var diagnostics = CombineDiagnostics(
                 itemPathDiagnostics,
                 deviceName.Diagnostic,
-                nodeId.Diagnostic);
+                nodeId.Diagnostic,
+                MissingPathTypeIdentifierDiagnostic(itemPath));
             var selector = diagnostics.Count == 0
                 ? NetworkSelectorFactory.Node(deviceName.Value, nodeId.Value, itemPath, nodeIndex)
                 : null;
@@ -342,7 +348,8 @@ public static class NetworkObjectIndexReader
             var connection = result.Summary;
             var diagnostics = CombineDiagnostics(
                 itemPathDiagnostics.Concat(connection.SelectorDiagnostics),
-                deviceName.Diagnostic);
+                deviceName.Diagnostic,
+                MissingPathTypeIdentifierDiagnostic(itemPath));
             var selector = diagnostics.Count == 0 ? connection.Selector : null;
             var indexText = string.Format(
                 CultureInfo.InvariantCulture,
@@ -380,6 +387,26 @@ public static class NetworkObjectIndexReader
             return NetworkObjectDiscoveryEvidence.UnreadableString(field);
         }
     }
+
+    private static NetworkObjectDiscoveryEvidenceValue<string> ReadOptionalTypeIdentifier(
+        Func<string?> read,
+        string field)
+    {
+        try
+        {
+            return NetworkObjectDiscoveryEvidence.ReadOptionalStringIdentity(read(), field);
+        }
+        catch (EngineeringException)
+        {
+            return NetworkObjectDiscoveryEvidence.UnreadableString(field);
+        }
+    }
+
+    private static string MissingPathTypeIdentifierDiagnostic(
+        IEnumerable<DeviceItemPathSegmentInfo> itemPath)
+        => itemPath.Any(segment => string.IsNullOrEmpty(segment.TypeIdentifier))
+            ? "A device item path type identifier was unavailable; non-device selectors are not available."
+            : string.Empty;
 
     private static NetworkObjectDiscoveryEvidenceValue<int> ReadTypedInt(
         Func<int> read,

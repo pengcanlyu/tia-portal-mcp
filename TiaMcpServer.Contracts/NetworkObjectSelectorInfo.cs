@@ -18,7 +18,11 @@ public sealed class DeviceItemPathSegmentInfo
     /// <summary>Position number of the module at this level of the device hierarchy.</summary>
     public int PositionNumber { get; set; }
 
-    /// <summary>Type identifier of the module at this level of the device hierarchy.</summary>
+    /// <summary>
+    /// Type identifier of the module at this level of the device hierarchy. Some TIA child device
+    /// items do not expose one; device-item inspection then uses an empty value and verifies the
+    /// remaining exact path evidence.
+    /// </summary>
     public string TypeIdentifier { get; set; } = string.Empty;
 }
 

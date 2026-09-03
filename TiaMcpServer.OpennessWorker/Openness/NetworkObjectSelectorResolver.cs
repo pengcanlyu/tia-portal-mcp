@@ -563,7 +563,7 @@ public static class NetworkObjectSelectorResolver
             try
             {
                 name = selected.Name;
-                typeIdentifier = selected.TypeIdentifier;
+                typeIdentifier = selected.TypeIdentifier ?? string.Empty;
                 positionNumber = selected.PositionNumber;
             }
             catch (EngineeringException exception)

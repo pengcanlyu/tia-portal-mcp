@@ -114,6 +114,17 @@ public class NetworkSelectorFactoryTests
                 new DeviceItemPathSegmentInfo[] { null! }));
     }
 
+    [Fact]
+    public void DeviceItem_AcceptsMissingTypeIdentifierFromTiaChildItem()
+    {
+        var segment = ValidSegment(0, "AI channel container");
+        segment.TypeIdentifier = string.Empty;
+
+        var selector = NetworkSelectorFactory.DeviceItem("PLC_1", new[] { segment });
+
+        Assert.Equal(string.Empty, Assert.Single(selector.ItemPath!).TypeIdentifier);
+    }
+
     // -------------------------------------------------------------------------
     // NetworkInterface
     // -------------------------------------------------------------------------

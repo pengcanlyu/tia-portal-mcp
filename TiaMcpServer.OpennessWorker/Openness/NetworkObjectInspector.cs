@@ -66,12 +66,21 @@ public static class NetworkObjectInspector
         var dynamic = EngineeringAttributeInspector.Inspect(
             resolved.EngineeringObject,
             attributeNames);
+        var channelDynamic = resolved.Value is Siemens.Engineering.HW.DeviceItem deviceItem
+            ? DeviceItemChannelInspector.Inspect(deviceItem)
+            : new NetworkAttributeMetadataProcessingResult();
+        var channelObservations = selectedNames is null
+            ? channelDynamic.Observations
+            : channelDynamic.Observations
+                .Where(observation => selectedNames.Contains(observation.Name))
+                .ToList();
         var attributes = NetworkAttributeResultBuilder.Build(
             modeled,
-            dynamic.Observations,
+            dynamic.Observations.Concat(channelObservations),
             attributeNames).ToList();
         var messages = resolved.Messages
             .Concat(dynamic.Diagnostics)
+            .Concat(channelDynamic.Diagnostics)
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
