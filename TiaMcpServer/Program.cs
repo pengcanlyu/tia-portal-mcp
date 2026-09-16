@@ -93,7 +93,8 @@ namespace TiaMcpServer
                    .WithTools<ProjectWriteTools>()
                    .WithTools<WriteBatchTools>()
                    .WithTools<NetworkWriteTools>()
-                   .WithTools<OpcUaWriteTools>();
+                   .WithTools<OpcUaWriteTools>()
+                   .WithTools<PlcProgramExportTools>();
             }
 
             using var host = builder.Build();

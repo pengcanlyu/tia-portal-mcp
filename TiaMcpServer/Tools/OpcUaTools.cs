@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
 using System.Text.Json;
 using ModelContextProtocol.Server;
 using TiaMcpServer.Contracts;
@@ -35,7 +36,8 @@ public class OpcUaReadTools
         bool keepFolderStructure = false,
         bool includeVariables = false,
         int maxVariables = 200,
-        string? projectPath = null)
+        string? projectPath = null,
+        [Description("Optional absolute JSON path containing the exact sourcePath allowlist to retain.")] string? allowedSourcePathsPath = null)
     {
         var result = await workerClient.InspectOpcUaVariablesAsync(
             plcName,
@@ -44,7 +46,8 @@ public class OpcUaReadTools
             keepFolderStructure,
             includeVariables,
             maxVariables,
-            projectPath).ConfigureAwait(false);
+            projectPath,
+            allowedSourcePathsPath).ConfigureAwait(false);
         return StandaloneToolResultFormatter.Format(result, "Set includeVariables=false or lower maxVariables.");
     }
 }
@@ -124,9 +127,11 @@ public class OpcUaWriteTools
         string? exportPath = null,
         string? catalogPath = null,
         string? plcName = null,
-        string? projectPath = null)
+        string? projectPath = null,
+        [Description("Optional absolute JSON path containing the exact sourcePath allowlist to retain.")] string? allowedSourcePathsPath = null)
         => CreateGeneratePreview(workerClient, safety, interfaceName, interfaceUri, keepFolderStructure,
-            enabled, replaceExisting, author, exportPath, catalogPath, plcName, projectPath);
+            enabled, replaceExisting, author, exportPath, catalogPath, plcName, projectPath,
+            allowedSourcePathsPath);
 
     [McpServerTool(Name = "generate_opcua_interface")]
     [Description("Create or replace a global-DB OPC UA server interface. " + SafetyFlowDescription)]
@@ -144,18 +149,20 @@ public class OpcUaWriteTools
         string? plcName = null,
         string? projectPath = null,
         bool confirm = false,
-        string? safetyToken = null)
+        string? safetyToken = null,
+        [Description("Optional absolute JSON path containing the exact sourcePath allowlist to retain.")] string? allowedSourcePathsPath = null)
     {
         if (string.IsNullOrWhiteSpace(safetyToken))
         {
             return await CreateGeneratePreview(workerClient, safety, interfaceName, interfaceUri,
                 keepFolderStructure, enabled, replaceExisting, author, exportPath, catalogPath,
-                plcName, projectPath).ConfigureAwait(false);
+                plcName, projectPath, allowedSourcePathsPath).ConfigureAwait(false);
         }
 
         if (!confirm) return ConfirmRequired("generate_opcua_interface");
+        var allowlist = ReadAllowedSourcePathsEvidence(allowedSourcePathsPath);
         var requestedInput = new { plcName, interfaceName, interfaceUri, keepFolderStructure, enabled,
-            replaceExisting, author, exportPath, catalogPath };
+            replaceExisting, author, exportPath, catalogPath, allowedSourcePaths = allowlist };
         var interfaceState = await ReadInterfaceState(workerClient, plcName, projectPath).ConfigureAwait(false);
         if (!interfaceState.Success)
         {
@@ -164,7 +171,7 @@ public class OpcUaWriteTools
 
         var generatedPreview = await workerClient.InspectOpcUaVariablesAsync(
             interfaceState.PlcName, interfaceName, interfaceUri, keepFolderStructure, false, 1,
-            interfaceState.ProjectPath).ConfigureAwait(false);
+            interfaceState.ProjectPath, allowlist?.Path, allowlist?.Sha256).ConfigureAwait(false);
         if (!generatedPreview.Success)
         {
             return WriteSafetyTooling.BuildApplyResult("generate_opcua_interface", generatedPreview);
@@ -185,7 +192,7 @@ public class OpcUaWriteTools
 
         var result = await workerClient.GenerateOpcUaInterfaceAsync(
             interfaceState.PlcName, interfaceName, interfaceUri, keepFolderStructure, enabled, replaceExisting,
-            author, exportPath, catalogPath, interfaceState.ProjectPath).ConfigureAwait(false);
+            author, exportPath, catalogPath, interfaceState.ProjectPath, allowlist?.Path, allowlist?.Sha256).ConfigureAwait(false);
         var verification = result.Success
             ? (await workerClient.ListOpcUaInterfacesAsync(
                 interfaceState.PlcName, interfaceState.ProjectPath).ConfigureAwait(false)).ToText()
@@ -329,8 +336,10 @@ public class OpcUaWriteTools
         string? exportPath,
         string? catalogPath,
         string? plcName,
-        string? projectPath)
+        string? projectPath,
+        string? allowedSourcePathsPath)
     {
+        var allowlist = ReadAllowedSourcePathsEvidence(allowedSourcePathsPath);
         var interfaceState = await ReadInterfaceState(workerClient, plcName, projectPath).ConfigureAwait(false);
         if (!interfaceState.Success)
         {
@@ -339,7 +348,7 @@ public class OpcUaWriteTools
 
         var generatedPreview = await workerClient.InspectOpcUaVariablesAsync(
             interfaceState.PlcName, interfaceName, interfaceUri, keepFolderStructure, false, 1,
-            interfaceState.ProjectPath).ConfigureAwait(false);
+            interfaceState.ProjectPath, allowlist?.Path, allowlist?.Sha256).ConfigureAwait(false);
         if (!generatedPreview.Success)
         {
             return WriteSafetyTooling.BuildApplyResult("generate_opcua_interface", generatedPreview);
@@ -347,7 +356,7 @@ public class OpcUaWriteTools
 
         var target = BuildTarget(interfaceState, interfaceName);
         var requestedInput = new { plcName, interfaceName, interfaceUri, keepFolderStructure, enabled,
-            replaceExisting, author, exportPath, catalogPath };
+            replaceExisting, author, exportPath, catalogPath, allowedSourcePaths = allowlist };
         return safety.CreatePreview(
             "generate_opcua_interface",
             interfaceState.ProjectPath,
@@ -357,6 +366,33 @@ public class OpcUaWriteTools
             BuildGenerateState(interfaceState.Source.Payload, generatedPreview.Payload, exportPath, catalogPath),
             generatedPreview.Payload,
             ApplyInstructions("generate_opcua_interface"));
+    }
+
+    private static AllowedSourcePathsEvidence? ReadAllowedSourcePathsEvidence(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        if (!Path.IsPathRooted(path))
+        {
+            throw new InvalidOperationException(
+                $"OPC UA source-path allowlist must be an absolute path: '{path}'.");
+        }
+
+        var normalizedPath = Path.GetFullPath(path);
+        var file = new FileInfo(normalizedPath);
+        if (!file.Exists)
+        {
+            throw new FileNotFoundException(
+                "OPC UA source-path allowlist must be an existing absolute file path.",
+                normalizedPath);
+        }
+
+        using var stream = file.OpenRead();
+        var sha256 = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        return new AllowedSourcePathsEvidence(normalizedPath, file.Length, sha256);
     }
 
     private static async Task<string> CreateSetEnabledPreview(
@@ -509,4 +545,6 @@ public class OpcUaWriteTools
     {
         public bool Success => Source.Success;
     }
+
+    private sealed record AllowedSourcePathsEvidence(string Path, long Length, string Sha256);
 }

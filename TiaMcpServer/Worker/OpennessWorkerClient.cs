@@ -932,6 +932,24 @@ public class OpennessWorkerClient : IDisposable
             "{}");
     }
 
+    public Task<WorkerCallResult> ExportPlcToFolderAsync(
+        string deviceName,
+        string exportPath,
+        string? projectPath)
+    {
+        return SendBoundProjectRequestAsync(
+            "export_plc_to_folder",
+            projectPath,
+            request =>
+            {
+                request.DeviceName = deviceName;
+                request.ExportPath = exportPath;
+                request.Confirm = true;
+                request.AllowTiaConfirmations = true;
+            },
+            "{}");
+    }
+
     public Task<WorkerCallResult> CreateTagTableAsync(
         string? plcName,
         string tableName,
@@ -1506,7 +1524,9 @@ public class OpennessWorkerClient : IDisposable
         bool keepFolderStructure,
         bool includeVariables,
         int maxVariables,
-        string? projectPath)
+        string? projectPath,
+        string? allowedSourcePathsPath = null,
+        string? allowedSourcePathsSha256 = null)
     {
         return SendBoundProjectRequestAsync(
             "inspect_opcua_variables",
@@ -1519,6 +1539,8 @@ public class OpennessWorkerClient : IDisposable
                 request.KeepFolderStructure = keepFolderStructure;
                 request.IncludeVariables = includeVariables;
                 request.MaxVariables = maxVariables;
+                request.AllowedSourcePathsPath = allowedSourcePathsPath;
+                request.AllowedSourcePathsSha256 = allowedSourcePathsSha256;
             },
             "{}");
     }
@@ -1553,7 +1575,9 @@ public class OpennessWorkerClient : IDisposable
         string? author,
         string? exportPath,
         string? catalogPath,
-        string? projectPath)
+        string? projectPath,
+        string? allowedSourcePathsPath = null,
+        string? allowedSourcePathsSha256 = null)
     {
         return SendBoundProjectRequestAsync(
             "generate_opcua_interface",
@@ -1569,6 +1593,8 @@ public class OpennessWorkerClient : IDisposable
                 request.Author = author;
                 request.ExportPath = exportPath;
                 request.CatalogPath = catalogPath;
+                request.AllowedSourcePathsPath = allowedSourcePathsPath;
+                request.AllowedSourcePathsSha256 = allowedSourcePathsSha256;
                 request.Confirm = true;
                 request.AllowTiaConfirmations = true;
             },

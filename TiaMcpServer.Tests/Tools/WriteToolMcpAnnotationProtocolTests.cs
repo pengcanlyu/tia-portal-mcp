@@ -11,6 +11,8 @@ public class WriteToolMcpAnnotationProtocolTests
         "browse_project_tree",
         "execute_read_batch",
         "get_project_status",
+        "inspect_opcua_variables",
+        "list_opcua_interfaces",
         "network_read",
     };
 
@@ -22,14 +24,25 @@ public class WriteToolMcpAnnotationProtocolTests
         "close_project",
         "compile_check",
         "create_project",
+        "delete_opcua_interface",
         "execute_read_batch",
+        "export_opcua_interface",
+        "export_plc_to_folder",
+        "generate_opcua_interface",
         "get_project_status",
+        "inspect_opcua_variables",
+        "list_opcua_interfaces",
         "network_read",
         "network_write",
         "open_project",
+        "preview_delete_opcua_interface",
+        "preview_export_plc_to_folder",
+        "preview_generate_opcua_interface",
+        "preview_set_opcua_interface_enabled",
         "preview_write_batch",
         "save_project",
         "save_project_as",
+        "set_opcua_interface_enabled",
     };
 
     private static readonly (string Name, bool ReadOnly, bool Destructive, bool OpenWorld)[] ExpectedWriteToolAnnotations =
@@ -42,6 +55,8 @@ public class WriteToolMcpAnnotationProtocolTests
         ("save_project_as", false, true, false),
         ("archive_project", false, true, false),
         ("close_project", false, true, false),
+        ("preview_export_plc_to_folder", false, false, true),
+        ("export_plc_to_folder", false, false, true),
     };
 
     [Fact]
@@ -52,7 +67,7 @@ public class WriteToolMcpAnnotationProtocolTests
         var byName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
 
         Assert.Equal(ReadWriteToolNames, tools.Select(tool => tool.Name));
-        Assert.Equal(14, tools.Length);
+        Assert.Equal(25, tools.Length);
 
         foreach (var expected in ExpectedWriteToolAnnotations)
         {
@@ -77,7 +92,7 @@ public class WriteToolMcpAnnotationProtocolTests
         var toolNames = tools.Select(tool => tool.Name).ToArray();
 
         Assert.Equal(ReadOnlyToolNames, toolNames);
-        Assert.Equal(4, tools.Length);
+        Assert.Equal(6, tools.Length);
 
         foreach (var writeToolName in ReadWriteToolNames.Except(ReadOnlyToolNames, StringComparer.Ordinal))
         {

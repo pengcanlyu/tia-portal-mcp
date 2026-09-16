@@ -30,7 +30,7 @@ public sealed class BatchOperationRequest : IOperationBatchItem
     [Description("PLC block path, e.g. PLC_1/Main or PLC_1/Blocks/Folder/Block. Required by get_block_content, update_block_logic, create_block, delete_block, create_block_group, and delete_block_group.")]
     public string? BlockPath { get; set; }
 
-    [Description("SIMATIC SD document content for the block. Required by update_block_logic.")]
+    [Description("SIMATIC SD document content for the block. Required by update_block_logic. May be @file:C:\\absolute\\path to read the content locally before preview/apply safety validation.")]
     public string? YamlContent { get; set; }
 
     [Description("Optional PLC software name to scope the operation. Honored by list_tag_tables, read_cross_references, start_plc, stop_plc, and the tag, tag-table, and user-constant operations.")]

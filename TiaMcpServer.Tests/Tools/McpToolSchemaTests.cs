@@ -129,7 +129,7 @@ public class McpToolSchemaTests
     /// absent.
     /// </summary>
     [Fact]
-    public void McpToolSurface_ExposesExactlyTwentyThreeApprovedTools()
+    public void McpToolSurface_ExposesExactlyTwentyFiveApprovedTools()
     {
         var toolTypes = typeof(ProjectLifecycleTools).Assembly
             .GetTypes()
@@ -162,6 +162,8 @@ public class McpToolSchemaTests
             "list_opcua_interfaces",
             "inspect_opcua_variables",
             "export_opcua_interface",
+            "preview_export_plc_to_folder",
+            "export_plc_to_folder",
             "preview_generate_opcua_interface",
             "generate_opcua_interface",
             "preview_set_opcua_interface_enabled",

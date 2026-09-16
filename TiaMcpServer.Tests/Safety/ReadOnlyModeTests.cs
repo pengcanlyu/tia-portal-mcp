@@ -571,7 +571,7 @@ public class ReadOnlyModeTests
     }
 
     [Fact]
-    public void ReadWriteMode_HasExactlyTwentyThreeDistinctTools()
+    public void ReadWriteMode_HasExactlyTwentyFiveDistinctTools()
     {
         var toolNames = typeof(ProjectLifecycleTools).Assembly
             .GetTypes()
@@ -588,9 +588,9 @@ public class ReadOnlyModeTests
             {
                 "apply_write_batch", "archive_project", "browse_project_tree", "close_project",
                 "compile_check", "create_project", "delete_opcua_interface", "execute_read_batch",
-                "export_opcua_interface", "generate_opcua_interface", "get_project_status",
+                "export_opcua_interface", "export_plc_to_folder", "generate_opcua_interface", "get_project_status",
                 "inspect_opcua_variables", "list_opcua_interfaces", "network_read", "network_write",
-                "open_project", "preview_delete_opcua_interface", "preview_generate_opcua_interface",
+                "open_project", "preview_delete_opcua_interface", "preview_export_plc_to_folder", "preview_generate_opcua_interface",
                 "preview_set_opcua_interface_enabled", "preview_write_batch", "save_project",
                 "save_project_as", "set_opcua_interface_enabled"
             },

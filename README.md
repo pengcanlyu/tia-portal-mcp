@@ -16,7 +16,7 @@ The current implementation covers project discovery and lifecycle operations, PL
 
 ## Tools
 
-The server currently exposes 23 tools in read-write mode and 6 tools in read-only mode.
+The server currently exposes 25 tools in read-write mode and 6 tools in read-only mode.
 
 ### Batch operations
 
@@ -32,6 +32,8 @@ Available read operations for `execute_read_batch`: `read_cross_references`, `ge
 Available write operations (for `preview_write_batch` / `apply_write_batch`): `update_block_logic`, `update_type_content`, `create_block` / `delete_block`, `create_block_group` / `delete_block_group`, `create_tag_table` / `delete_tag_table`, `create_tag` / `update_tag` / `delete_tag`, `create_user_constant` / `update_user_constant` / `delete_user_constant`.
 
 `get_block_content` / `update_block_logic` and `get_type_content` / `update_type_content` accept a `format` field. `format=source` is available for global data blocks, PLC data types, and SCL-language FB/FC/OB. Every other block language stays on `format=xml`.
+
+For large block updates, this fork accepts an absolute local-file reference in `update_block_logic.yamlContent`, for example `@file:C:\\work\\Main.scl`. The host expands the file before both preview and apply safety checks, so the safety token is bound to the actual content and becomes invalid if the file changes.
 
 `withDependencies` (reads only, default `false`) asks TIA Portal to include the object's dependency closure. The resulting document declares several objects and is **context only** — a write refuses any source declaring more than one object, and the read carries a warning saying so. Omit the field to get a document you can edit and submit back.
 
@@ -71,6 +73,12 @@ This fork adds guarded management of TIA Portal OPC UA user-modelled interfaces:
 - `preview_delete_opcua_interface` / `delete_opcua_interface` - preview and delete an interface.
 
 Every OPC UA mutation uses the same safety-token contract as the other writes. Generation and export bind the token to the resolved project and PLC identity, include a model fingerprint in the current-state hash, and restore the previous interface/output files when a downstream operation fails.
+
+`inspect_opcua_variables`, `preview_generate_opcua_interface`, and `generate_opcua_interface` optionally accept `allowedSourcePathsPath`, an absolute JSON file containing either a string array or `{ "sourcePaths": [...] }`. Generation keeps only those exact source paths. The preview token binds both the normalized file path and SHA-256, so changing the allowlist requires a fresh preview.
+
+### PLC ProgramUpdate folder export
+
+This fork also exposes `preview_export_plc_to_folder` / `export_plc_to_folder` for creating a complete `SIMATIC.S7S` folder consumable by SIMATIC Automation Tool ProgramUpdate. The destination must not already exist, the export is bound to the exact TIA Portal project session, and apply requires the preview token. The operation writes files only and never downloads to a PLC.
 
 ## Write safety
 

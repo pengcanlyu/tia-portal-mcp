@@ -76,10 +76,14 @@
       Link="Host\ProjectWriteTools.cs" />
     <Compile Include="..\TiaMcpServer\Tools\OpcUaTools.cs"
       Link="Host\OpcUaTools.cs" />
+    <Compile Include="..\TiaMcpServer\Tools\PlcProgramExportTools.cs"
+      Link="Host\PlcProgramExportTools.cs" />
     <Compile Include="..\TiaMcpServer\Batch\BatchOperationRequest.cs"
       Link="Host\Batch\BatchOperationRequest.cs" />
     <Compile Include="..\TiaMcpServer\Batch\BatchOperationCatalog.cs"
       Link="Host\Batch\BatchOperationCatalog.cs" />
+    <Compile Include="..\TiaMcpServer\Batch\BatchLocalFileContentResolver.cs"
+      Link="Host\Batch\BatchLocalFileContentResolver.cs" />
     <Compile Include="..\TiaMcpServer\Batch\BatchSafetySnapshot.cs"
       Link="Host\Batch\BatchSafetySnapshot.cs" />
     <Compile Include="..\TiaMcpServer\Batch\BatchPreviewDiff.cs"

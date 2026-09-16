@@ -32,6 +32,15 @@ public class WriteBatchTools
         WriteSafetyService safety,
         [Description("Ordered list of write operations. Each: { operationId, operation, ...operation parameters }.")] BatchOperationRequest[] operations)
     {
+        var fileResolution = BatchLocalFileContentResolver.Resolve(operations);
+        if (!fileResolution.IsValid)
+        {
+            return OperationBatchResultFormatter.Error(
+                PreviewToolName,
+                fileResolution.Error!,
+                WorkerFailureCategories.ValidationError);
+        }
+
         var validation = BatchOperationCatalog.ValidateWriteBatch(operations);
         if (!validation.IsValid)
         {
@@ -102,6 +111,15 @@ public class WriteBatchTools
             return OperationBatchResultFormatter.Error(
                 ApplyToolName,
                 "Operation not confirmed. Set confirm=true to proceed with applying the write batch.");
+        }
+
+        var fileResolution = BatchLocalFileContentResolver.Resolve(operations);
+        if (!fileResolution.IsValid)
+        {
+            return OperationBatchResultFormatter.Error(
+                ApplyToolName,
+                fileResolution.Error!,
+                WorkerFailureCategories.ValidationError);
         }
 
         var validation = BatchOperationCatalog.ValidateWriteBatch(operations);

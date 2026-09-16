@@ -115,14 +115,17 @@ internal sealed class McpProtocolTestHarness : IAsyncDisposable
             {
                 builder.WithTools<ProjectReadTools>()
                        .WithTools<ReadBatchTools>()
-                       .WithTools<NetworkReadTools>();
+                       .WithTools<NetworkReadTools>()
+                       .WithTools<OpcUaReadTools>();
 
                 if (accessMode == McpAccessMode.ReadWrite)
                 {
                     builder.WithTools<ProjectEngineeringTools>()
                            .WithTools<ProjectWriteTools>()
                            .WithTools<WriteBatchTools>()
-                           .WithTools<NetworkWriteTools>();
+                           .WithTools<NetworkWriteTools>()
+                           .WithTools<OpcUaWriteTools>()
+                           .WithTools<PlcProgramExportTools>();
                 }
             },
             auditDirectory,

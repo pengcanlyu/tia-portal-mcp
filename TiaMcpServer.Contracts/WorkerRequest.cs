@@ -354,11 +354,20 @@ public class WorkerRequest
     /// <summary>Allow replacing an existing interface with the requested name.</summary>
     public bool ReplaceExisting { get; set; }
 
-    /// <summary>Optional XML export path for an OPC UA interface.</summary>
+    /// <summary>
+    /// Optional XML export path for an OPC UA interface, or the new destination directory for
+    /// export_plc_to_folder.
+    /// </summary>
     public string? ExportPath { get; set; }
 
     /// <summary>Optional UTF-8 JSON NodeId catalog path.</summary>
     public string? CatalogPath { get; set; }
+
+    /// <summary>Optional absolute JSON file containing exact OPC UA variable source paths to retain.</summary>
+    public string? AllowedSourcePathsPath { get; set; }
+
+    /// <summary>Expected SHA-256 of the allowlist bytes retained by the host safety input.</summary>
+    public string? AllowedSourcePathsSha256 { get; set; }
 
     #endregion
 
