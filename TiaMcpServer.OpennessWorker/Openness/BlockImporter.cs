@@ -89,7 +89,95 @@ public static class BlockImporter
 
         if (result.State != DocumentResultState.Success)
         {
-            throw new InvalidOperationException("Import failed with state: " + result.State);
+            throw new InvalidOperationException(
+                $"Import failed with state: {result.State}. {DescribeResult(result)}");
+        }
+    }
+
+    private static string DescribeResult(object result)
+    {
+        try
+        {
+            var parts = new List<string>();
+            foreach (var property in result.GetType().GetProperties())
+            {
+                object? value;
+                try
+                {
+                    value = property.GetValue(result);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (value is null)
+                {
+                    continue;
+                }
+
+                if (value is System.Collections.IEnumerable enumerable && value is not string)
+                {
+                    var items = new List<string>();
+                    foreach (var item in enumerable)
+                    {
+                        items.Add(DescribeObject(item));
+                    }
+
+                    if (items.Count > 0)
+                    {
+                        parts.Add($"{property.Name}=[{string.Join("; ", items)}]");
+                    }
+                }
+                else
+                {
+                    parts.Add($"{property.Name}={value}");
+                }
+            }
+
+            return string.Join(" | ", parts);
+        }
+        catch (Exception exception)
+        {
+            return $"Could not describe import result: {exception.Message}";
+        }
+    }
+
+    private static string DescribeObject(object? item)
+    {
+        if (item is null)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var parts = new List<string>();
+            foreach (var property in item.GetType().GetProperties())
+            {
+                object? value;
+                try
+                {
+                    value = property.GetValue(item);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (value is not null)
+                {
+                    parts.Add($"{property.Name}={value}");
+                }
+            }
+
+            return parts.Count > 0
+                ? "{" + string.Join(", ", parts) + "}"
+                : item.ToString() ?? string.Empty;
+        }
+        catch
+        {
+            return item.ToString() ?? string.Empty;
         }
     }
 

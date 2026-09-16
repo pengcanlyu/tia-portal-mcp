@@ -197,15 +197,37 @@ public static class CompileChecker
 
         foreach (CompilerResultMessage message in messages)
         {
-            result.Add(new CompileMessageInfo
-            {
-                Description = message.Description,
-                Path = ReadMessagePath(message),
-                Severity = MapMessageSeverity(message)
-            });
+            AppendMessageTree(message, result);
         }
 
         return result;
+    }
+
+    private static void AppendMessageTree(
+        CompilerResultMessage message,
+        List<CompileMessageInfo> result)
+    {
+        result.Add(new CompileMessageInfo
+        {
+            Description = message.Description,
+            Path = ReadMessagePath(message),
+            Severity = MapMessageSeverity(message)
+        });
+
+        // PLC-wide compilation exposes actionable block diagnostics below aggregate entries.
+        PropertyInfo? childrenProperty = message.GetType().GetProperty("Messages");
+        if (childrenProperty?.GetValue(message, null) is not System.Collections.IEnumerable children)
+        {
+            return;
+        }
+
+        foreach (object? child in children)
+        {
+            if (child is CompilerResultMessage compilerMessage)
+            {
+                AppendMessageTree(compilerMessage, result);
+            }
+        }
     }
 
     private static string MapMessageSeverity(CompilerResultMessage message)
