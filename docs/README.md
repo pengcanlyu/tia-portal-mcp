@@ -10,6 +10,7 @@ For the project overview, tool list, and quick start, see the [README](../README
 | Document | What you will find |
 | --- | --- |
 | [pengcanlyu v4 integration](guides/pengcanlyu-v4.md) | Fork migration, 8/18/18 tools, SM parameters, OPC UA, local source files, offline SAT export and authorization |
+| [Openness hardware coverage](guides/openness-hardware-coverage.md) | Capability discovery, SM placement, modeled I/O addresses, hardware compile, coverage matrix and explicit limits |
 | [Installation](guides/installation.md) | Requirements, installation/doctor, explicit binding, 8/18/18 fork modes, and mode-derived lifecycle confirmation |
 | [MCP client configuration](guides/mcp-client-configuration.md) | Client configuration, bind/open migration, lifecycle confirmation, guarded Network and `plc_write` migration, and block paths |
 | [Troubleshooting](guides/troubleshooting.md) | Common failures, and TIA Portal V21 behaviors verified against a real installation |
@@ -39,6 +40,7 @@ For the project overview, tool list, and quick start, see the [README](../README
 | [Contributing](../CONTRIBUTING.md) | Contribution workflow, branch focus, commit message format, pull requests |
 | [Building from source](development/building.md) | Restore, build, test with coverage, and run the server locally |
 | [pengcanlyu v4 verification](development/pengcanlyu-v4-verification.md) | Scoped automated/live evidence, restored analog parameter, OPC UA and offline export checks, explicit limits |
+| [Hardware coverage verification](development/openness-hardware-verification.md) | v4 fork revision 2 placement, 7NF mode/range edits, address units/collisions, restoration and truthful compile diagnostics |
 | [Local MCP sandbox testing](development/local-mcp-testing.md) | MCP Inspector, actual-by-default Network inputs, frozen Network fixtures/restoration boundaries, and lifecycle gates |
 | [Packaging](development/packaging.md) | Build the NuGet package and install a local branch build as the `tia-mcp` global tool |
 | [Bug-fix wave orchestration](development/bug-fix-wave-orchestration.md) | Branch/worktree ownership, wave barriers, offline/live gates, PR creation, and merge protocol |

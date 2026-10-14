@@ -3,7 +3,7 @@
 This fork is based on upstream **v4.0.0 (7301fb8)**. It retains the upstream
 documentation, explicit project binding, canonical response contracts, PLC and
 network write pipeline, Multiuser support, HMI reads and compile diagnostics.
-The package version is **4.0.0-pengcanlyu.1**. There are 8 tools in read-only and
+The package version is **4.0.0-pengcanlyu.2**. There are 8 tools in read-only and
 18 in read-write/full. Do not install the upstream NuGet package and assume it
 contains these fork extensions.
 
@@ -24,6 +24,10 @@ contains these fork extensions.
   that server prompt, not Siemens access controls or the write guards.
 
 ## Hardware module and channel parameters
+
+See [Openness hardware coverage](openness-hardware-coverage.md) for capability
+preflight, guarded SM insertion, typed I/O address editing and hardware compile
+added in revision 2. Existing v1 verification remains historical evidence.
 
 First get the hardware hierarchy with `network_read/read_hardware_config`.
 Use exact name segments starting at the device's direct children, not a guessed
@@ -120,7 +124,7 @@ Do not grant blanket access to unrelated executables or approve other dialogs.
 - [Siemens Openness code snippets](https://github.com/siemens/tia-portal-openness-code-snippets)
 - [Siemens TIA AI extensions](https://github.com/siemens/tia-portal-ai-extensions)
 - [Siemens channel access documentation](https://docs.tia.siemens.cloud/r/Rc0LxW522mLHDCX_sejL~A/S~HYtmj5j71~B4V9IoWa_A)
-- Installed V21 hardware-parameter manual, 11/2025, 7NF00 V1.0/V1.1/V1.2 tables.
+- Installed V21 hardware-parameter manual, 11/2025, 7NF00 V1.0/V1.1 tables; V1.2 behavior was verified separately in the local fixture.
 
 The Siemens repositories provide samples/guidance, not certification of this
 fork. TIA engineering verification is not physical I/O commissioning.

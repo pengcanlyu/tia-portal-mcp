@@ -50,6 +50,7 @@ public static class ProjectCapabilityCatalog
     {
         "engineering_read", "engineering_write",
         "inspect_hardware_parameters", "list_opcua_interfaces", "inspect_opcua_variables",
+        "inspect_hardware_capabilities", "inspect_hardware_layout", "check_hardware_module", "plug_hardware_module", "compile_hardware",
         "set_hardware_parameters", "generate_opcua_interface", "set_opcua_interface_enabled", "delete_opcua_interface", "export_opcua_interface", "export_plc_to_folder"
     };
 

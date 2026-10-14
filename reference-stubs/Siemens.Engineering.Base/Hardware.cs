@@ -2,12 +2,17 @@
 #nullable disable // V21 net48 signatures have no nullable annotations.
 namespace Siemens.Engineering.HW
 {
+    public abstract class AddressAssociation : global::System.Collections.Generic.IEnumerable<Address>
+    {
+        public global::System.Collections.Generic.IEnumerator<Address> GetEnumerator() => throw new global::System.NotSupportedException();
+        global::System.Collections.IEnumerator global::System.Collections.IEnumerable.GetEnumerator() => throw new global::System.NotSupportedException();
+    }
     public abstract class Address : global::Siemens.Engineering.IEngineeringObject, global::Siemens.Engineering.IEngineeringInstance, global::Siemens.Engineering.IEngineeringServiceProvider
     {
         public global::Siemens.Engineering.HW.Features.AddressControllerAssociation AddressControllers { get => throw new global::System.NotSupportedException(); }
         public global::Siemens.Engineering.HW.AddressIoType IoType { get => throw new global::System.NotSupportedException(); }
         public int Length { get => throw new global::System.NotSupportedException(); }
-        public int StartAddress { get => throw new global::System.NotSupportedException(); }
+        public int StartAddress { get => throw new global::System.NotSupportedException(); set => throw new global::System.NotSupportedException(); }
         object global::Siemens.Engineering.IEngineeringObject.GetAttribute(string name) => throw new global::System.NotSupportedException();
         void global::Siemens.Engineering.IEngineeringObject.SetAttribute(string name, object value) => throw new global::System.NotSupportedException();
         global::System.Collections.Generic.IList<global::Siemens.Engineering.EngineeringAttributeInfo> global::Siemens.Engineering.IEngineeringObject.GetAttributeInfos() => throw new global::System.NotSupportedException();
@@ -23,6 +28,11 @@ namespace Siemens.Engineering.HW
     }
     public enum AddressIoType : int
     {
+        None = 0,
+        Input = 1,
+        Output = 2,
+        Substitute = 16,
+        Diagnosis = 64,
     }
     public abstract class Channel : global::Siemens.Engineering.IEngineeringObject, global::Siemens.Engineering.IEngineeringInstance, global::Siemens.Engineering.IEngineeringServiceProvider
     {
@@ -78,6 +88,7 @@ namespace Siemens.Engineering.HW
         public global::Siemens.Engineering.HW.AddressComposition Addresses { get => throw new global::System.NotSupportedException(); }
         public global::Siemens.Engineering.HW.ChannelComposition Channels { get => throw new global::System.NotSupportedException(); }
         public global::Siemens.Engineering.HW.DeviceItemClassifications Classification { get => throw new global::System.NotSupportedException(); }
+        public global::Siemens.Engineering.HW.HardwareObject Container { get => throw new global::System.NotSupportedException(); }
         public bool IsBuiltIn { get => throw new global::System.NotSupportedException(); }
         public bool IsPlugged { get => throw new global::System.NotSupportedException(); }
         public int PositionNumber { get => throw new global::System.NotSupportedException(); }
@@ -113,6 +124,8 @@ namespace Siemens.Engineering.HW
     }
     public abstract class HardwareObject : global::Siemens.Engineering.IEngineeringObject, global::Siemens.Engineering.IEngineeringInstance, global::Siemens.Engineering.IEngineeringServiceProvider
     {
+        public bool CanPlugNew(string typeIdentifier, string name, int positionNumber) => throw new global::System.NotSupportedException();
+        public global::Siemens.Engineering.HW.DeviceItem PlugNew(string typeIdentifier, string name, int positionNumber) => throw new global::System.NotSupportedException();
         public global::Siemens.Engineering.HW.DeviceItemComposition DeviceItems { get => throw new global::System.NotSupportedException(); }
         public string Name { get => throw new global::System.NotSupportedException(); }
         public string TypeIdentifier { get => throw new global::System.NotSupportedException(); }
@@ -243,6 +256,7 @@ namespace Siemens.Engineering.HW.Features
 {
     public abstract class AddressController : global::Siemens.Engineering.HW.Features.DeviceItemFeature, global::Siemens.Engineering.IEngineeringObject, global::Siemens.Engineering.IEngineeringInstance, global::Siemens.Engineering.IEngineeringService
     {
+        public global::Siemens.Engineering.HW.AddressAssociation RegisteredAddresses { get => throw new global::System.NotSupportedException(); }
         object global::Siemens.Engineering.IEngineeringObject.GetAttribute(string name) => throw new global::System.NotSupportedException();
         void global::Siemens.Engineering.IEngineeringObject.SetAttribute(string name, object value) => throw new global::System.NotSupportedException();
         global::System.Collections.Generic.IList<global::Siemens.Engineering.EngineeringAttributeInfo> global::Siemens.Engineering.IEngineeringObject.GetAttributeInfos() => throw new global::System.NotSupportedException();

@@ -16,7 +16,8 @@ internal static class EngineeringExtensionService
     {
         var error = EngineeringExtensionOperations.Validate(query, false);
         if (error != null) throw new ArgumentException(error);
-        if (query.Operation == "inspect_hardware_parameters") return HardwareParameterService.Read(project, query);
+        if (query.Operation is "inspect_hardware_parameters" or "inspect_hardware_capabilities") return HardwareParameterService.Read(project, query);
+        if (query.Operation is "inspect_hardware_layout" or "check_hardware_module") return HardwareLayoutService.Read(project, query);
         var value = query.Operation == "list_opcua_interfaces"
             ? OpcUaInterfaceService.List(project, query.PlcName)
             : Inspect(project, query);
@@ -32,6 +33,8 @@ internal static class EngineeringExtensionService
         var error = EngineeringExtensionOperations.Validate(query, true);
         if (error != null) throw new ArgumentException(error);
         if (query.Operation == "set_hardware_parameters") return HardwareParameterService.Check(project, query);
+        if (query.Operation == "plug_hardware_module") return HardwareLayoutService.Check(project, query);
+        if (query.Operation == "compile_hardware") return HardwareCompileService.Probe(project, query);
         CheckOutput(query.ExportPath, query.Operation == "export_plc_to_folder");
         CheckOutput(query.CatalogPath, false);
         if (query.Operation == "export_plc_to_folder")
@@ -61,6 +64,8 @@ internal static class EngineeringExtensionService
         if (before.StateHash != expectedProbeHash) throw new WorkerOperationException(
             WorkerFailureCategories.StateChanged, "Target state changed after preparation. Inspect before retrying.");
         if (query.Operation == "set_hardware_parameters") return HardwareParameterService.Write(project, query);
+        if (query.Operation == "plug_hardware_module") return HardwareLayoutService.Plug(project, query);
+        if (query.Operation == "compile_hardware") return HardwareCompileService.Compile(project, query);
         object value = query.Operation switch {
             "generate_opcua_interface" => OpcUaInterfaceService.Generate(project, query.PlcName, query.InterfaceName,
                 query.InterfaceUri, query.KeepFolderStructure, query.Enabled, query.ReplaceExisting, query.Author,

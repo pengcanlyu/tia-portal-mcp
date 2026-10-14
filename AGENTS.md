@@ -2,12 +2,15 @@
 
 ## pengcanlyu fork additions
 
-The v4.0.0-pengcanlyu.1 fork adds `engineering_read`/`engineering_write` and
+The v4.0.0-pengcanlyu.2 fork adds `engineering_read`/`engineering_write` and
 retains local source-file input, OPC UA management and offline SAT folder export.
 Actual fork counts are **8/18/18**; the upstream historical counts below describe
 the upstream surface. Extension operations are standalone-only and use the
 existing guarded pipeline. `engineering_write` defaults to preview. Read the
 [fork guide](docs/guides/pengcanlyu-v4.md) before changing these operations.
+The [hardware coverage guide](docs/guides/openness-hardware-coverage.md) covers
+metadata preflight, guarded module insertion, modeled address edits and hardware
+compile. Do not replace missing Siemens capabilities with arbitrary invocation.
 
 MCP server for Siemens TIA Portal V21. Exposes 7 tools in read-only, 16 in read-write (startup default), and the same 16 in full mode. Read-write permits in-project edits, compile, and lifecycle with one confirmation prompt per actual lifecycle call. Full runs lifecycle without server elicitation and adds no tools or operations; PLC run/stop was removed. The installer defaults to read-only. Windows-only, requires TIA Portal V21 with Openness enabled.
 
