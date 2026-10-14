@@ -11,7 +11,6 @@ using System.Xml.Linq;
 using Siemens.Engineering;
 using Siemens.Engineering.Multiuser;
 using Siemens.Engineering.SW.Blocks;
-using Siemens.Engineering.SW.Blocks.Interface;
 using Siemens.Engineering.SW.Types;
 
 namespace TiaMcpServer.OpennessWorker.Openness.OpcUa.SiemensGenerator
@@ -121,7 +120,7 @@ namespace TiaMcpServer.OpennessWorker.Openness.OpcUa.SiemensGenerator
             #region EXPORT DATA BLOCK FROM TIA'S PROJECT
 
             // Check if the data block is consistent (the project has been compiled)
-            bool isConsistent = (bool)block.GetAttribute("IsConsistent");
+            bool isConsistent = (bool)((IEngineeringObject)block).GetAttribute("IsConsistent");
             if (isConsistent == false)
             {
                 throw new InvalidOperationException($"Data block '{block.Name}' is inconsistent. Compile the PLC before generating the OPC UA interface.");

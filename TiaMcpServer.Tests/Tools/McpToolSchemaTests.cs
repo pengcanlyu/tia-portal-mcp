@@ -1,11 +1,15 @@
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.AI;
 using ModelContextProtocol.Server;
-using TiaMcpServer.Batch;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Cursors;
 using TiaMcpServer.Network;
+using TiaMcpServer.ProjectLifecycle;
+using TiaMcpServer.ProjectTree;
 using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
 using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
 using Xunit;
@@ -14,17 +18,16 @@ namespace TiaMcpServer.Tests.Tools;
 
 /// <summary>
 /// Verifies the MCP input schema the SDK actually generates for the write tools never exposes
-/// the DI-injected <c>safety</c>/<c>workerClient</c> parameters as model-supplied arguments.
+/// the DI-injected <c>workerClient</c> parameter as model-supplied arguments.
 ///
-/// Those tools declare <c>WriteSafetyService safety</c> and <c>OpennessWorkerClient
+/// Those tools declare <c>OpennessWorkerClient
 /// workerClient</c> as plain typed parameters with no [FromServices]-style attribute, relying
 /// entirely on the MCP SDK inferring "these come from DI, not the model" from
 /// McpServerToolCreateOptions.Services (mirroring exactly how the real host wires tools in
 /// Program.cs via WithToolsFromAssembly). If the SDK ever stopped recognizing that - a version
 /// bump, a change in how Services is threaded through - every write tool's schema would gain a
 /// required object argument no model can ever supply, taking down the entire write surface,
-/// while BatchToolMetadataTests and WriteToolSafetyTokenTests (which only reflect over
-/// [McpServerTool]/[Description] attributes) would stay green.
+/// while attribute-only tests would stay green.
 ///
 /// This is why it has to inspect McpServerTool.Create(...).ProtocolTool.InputSchema - the actual
 /// generated JSON schema - rather than attributes.
@@ -38,8 +41,20 @@ public class McpToolSchemaTests
     {
         var binding = new ProjectSessionBinding(null);
         var workerClient = new OpennessWorkerClient(binding);
-        var safety = new WriteSafetyService();
-        return new FakeServiceProvider(binding, workerClient, safety);
+        var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var cursorCodec = new ProjectTreeCursorCodec(protector);
+        var store = new ProjectTreeSnapshotStore(TimeProvider.System);
+        var projector = new ProjectTreePageProjector(cursorCodec);
+        var coordinator = new ProjectTreeBrowseCoordinator(
+            workerClient,
+            cursorCodec,
+            store,
+            projector,
+            TimeProvider.System);
+        var execution = new WriteExecution(new OpennessWriteBindingGate(workerClient),
+            new JsonlWriteAuditSink(Path.Combine(Path.GetTempPath(), "tia-schema-" + Guid.NewGuid().ToString("N"))),
+            LifecycleWriteDomain.Catalog, TimeProvider.System);
+        return new FakeServiceProvider(binding, workerClient, coordinator, execution);
     }
 
     private static string[] SchemaPropertyNames(Type toolType, string methodName)
@@ -87,36 +102,55 @@ public class McpToolSchemaTests
         return tool.ProtocolTool.InputSchema.GetRawText();
     }
 
-    [Theory]
-    [InlineData(nameof(ProjectLifecycleTools.GetProjectStatus))]
-    [InlineData(nameof(ProjectLifecycleTools.OpenProject))]
-    [InlineData(nameof(ProjectLifecycleTools.CreateProject))]
-    [InlineData(nameof(ProjectLifecycleTools.SaveProject))]
-    [InlineData(nameof(ProjectLifecycleTools.SaveProjectAs))]
-    [InlineData(nameof(ProjectLifecycleTools.ArchiveProject))]
-    [InlineData(nameof(ProjectLifecycleTools.CloseProject))]
-    public void ProjectLifecycleTools_SchemaNeverExposesInjectedServiceParameters(string methodName)
+    private static McpServerTool Tool(Type toolType, string methodName)
     {
-        var properties = SchemaPropertyNames(typeof(ProjectLifecycleTools), methodName);
+        var method = toolType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+        Assert.NotNull(method);
+        return McpServerTool.Create(
+            method!,
+            target: null,
+            options: new McpServerToolCreateOptions
+            {
+                Services = Services,
+                SchemaCreateOptions = new AIJsonSchemaCreateOptions
+                {
+                    TransformOptions = new AIJsonSchemaTransformOptions
+                    {
+                        DisallowAdditionalProperties = true,
+                    },
+                },
+            });
+    }
 
-        Assert.DoesNotContain("workerClient", properties);
-        Assert.DoesNotContain("safety", properties);
+    // Exact sets: any extra public input, including a retired confirmation argument, fails here.
+    [Theory]
+    [InlineData(nameof(ProjectWriteTools.OpenProject), "dryRun,forceRebind,projectPath")]
+    [InlineData(nameof(ProjectWriteTools.CreateProject), "author,comment,dryRun,projectDirectory,projectName")]
+    [InlineData(nameof(ProjectWriteTools.SaveProject), "dryRun,projectPath")]
+    [InlineData(nameof(ProjectWriteTools.SaveProjectAs), "dryRun,projectPath,rebind,targetDirectory,targetName")]
+    [InlineData(nameof(ProjectWriteTools.ArchiveProject), "archiveDirectory,archiveName,dryRun,mode,projectPath,saveBeforeArchive")]
+    [InlineData(nameof(ProjectWriteTools.CloseProject), "dryRun,projectPath,saveBeforeClose")]
+    public void LifecycleSchemas_ExposeExactlyModelInputs(string methodName, string expected)
+    {
+        var properties = SchemaPropertyNames(typeof(ProjectWriteTools), methodName);
+
+        Assert.Equal(expected.Split(','), properties.OrderBy(name => name, StringComparer.Ordinal).ToArray());
     }
 
     /// <summary>
     /// Whole-assembly enumeration (not a hardcoded/spot-checked list of tool classes): finds
     /// every type carrying <see cref="McpServerToolTypeAttribute"/> in the same assembly
-    /// ProjectLifecycleTools lives in - which, for TiaMcpServer.Tests, is the test assembly
+    /// ProjectWriteTools lives in - which, for TiaMcpServer.Tests, is the test assembly
     /// itself, since the host's tool source files are compiled directly into it (see
     /// TiaMcpServer.Tests.csproj's Compile Include entries). Counts every method on those types
-    /// carrying [McpServerTool] and asserts the exact approved surface: 23 tools total, and the
+    /// carrying [McpServerTool] and asserts the exact approved surface: 16 tools total, and the
     /// internal lifecycle probe (probe_project_status_for_lifecycle, never [McpServerTool]-decorated)
     /// absent.
     /// </summary>
     [Fact]
-    public void McpToolSurface_ExposesExactlyTwentyThreeApprovedTools()
+    public void McpToolSurface_ExposesExactlyFifteenApprovedTools()
     {
-        var toolTypes = typeof(ProjectLifecycleTools).Assembly
+        var toolTypes = typeof(ProjectWriteTools).Assembly
             .GetTypes()
             .Where(t => t.GetCustomAttribute<McpServerToolTypeAttribute>() is not null);
 
@@ -130,29 +164,24 @@ public class McpToolSchemaTests
 
         var expected = new[]
         {
+            "bind_project",
             "get_project_status",
+            "hmi_read",
             "browse_project_tree",
-            "execute_read_batch",
-            "compile_check",
+                "compile_check",
             "open_project",
             "create_project",
             "save_project",
             "save_project_as",
             "archive_project",
             "close_project",
-            "preview_write_batch",
-            "apply_write_batch",
             "network_read",
             "network_write",
-            "list_opcua_interfaces",
-            "inspect_opcua_variables",
-            "export_opcua_interface",
-            "preview_generate_opcua_interface",
-            "generate_opcua_interface",
-            "preview_set_opcua_interface_enabled",
-            "set_opcua_interface_enabled",
-            "preview_delete_opcua_interface",
-            "delete_opcua_interface"
+            "plc_read",
+            "plc_write",
+            "engineering_read",
+            "engineering_write",
+            "read_cross_references"
         };
 
         Assert.Equal(expected.OrderBy(name => name), toolNames);
@@ -160,14 +189,17 @@ public class McpToolSchemaTests
     }
 
     [Fact]
-    public void McpReadOnlySurface_ExposesExactlySixApprovedTools()
+    public void McpReadOnlySurface_RemainsExactlyEightApprovedTools()
     {
         var toolNames = new[]
         {
+            typeof(ProjectBindingTools),
             typeof(ProjectReadTools),
-            typeof(ReadBatchTools),
             RequiredNetworkToolType("NetworkReadTools"),
-            typeof(OpcUaReadTools),
+            typeof(TiaMcpServer.Plc.PlcReadTools),
+            typeof(TiaMcpServer.Hmi.HmiReadTools),
+            typeof(TiaMcpServer.CrossReferences.CrossReferenceReadTools),
+            typeof(TiaMcpServer.Extensions.EngineeringReadTools),
         }
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
             .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
@@ -177,12 +209,7 @@ public class McpToolSchemaTests
             .ToArray();
 
         Assert.Equal(
-            new[]
-            {
-                "browse_project_tree", "execute_read_batch", "get_project_status",
-                "inspect_opcua_variables", "list_opcua_interfaces",
-                "network_read"
-            },
+            new[] { "bind_project", "browse_project_tree", "engineering_read", "get_project_status", "hmi_read", "network_read", "plc_read", "read_cross_references" },
             toolNames);
         Assert.DoesNotContain("probe_network_object_attributes", toolNames);
     }
@@ -193,23 +220,47 @@ public class McpToolSchemaTests
         // Negative assertions alone would also pass if the SDK generated an empty schema for
         // every tool (e.g. a broken reflection path) - this proves it did pick up the real,
         // model-facing parameters, not just excluded the DI ones.
-        var properties = SchemaPropertyNames(typeof(ProjectLifecycleTools), nameof(ProjectLifecycleTools.OpenProject));
+        var properties = SchemaPropertyNames(typeof(ProjectWriteTools), nameof(ProjectWriteTools.OpenProject));
 
         Assert.Contains("projectPath", properties);
-        Assert.Contains("confirm", properties);
-        Assert.Contains("safetyToken", properties);
+        Assert.Contains("dryRun", properties);
+        Assert.DoesNotContain("acknowledge", properties);
+        Assert.DoesNotContain("confirm", properties);
     }
 
-    [Theory]
-    [InlineData(nameof(BatchTools.PreviewWriteBatch))]
-    [InlineData(nameof(BatchTools.ApplyWriteBatch))]
-    public void BatchTools_SchemaNeverExposesInjectedServiceParameters(string methodName)
+    [Fact]
+    public void OpenProject_SchemaStillExposesProjectPathAsAModelArgument_OnRegisteredTool()
     {
-        var properties = SchemaPropertyNames(typeof(BatchTools), methodName);
+        var properties = SchemaPropertyNames(typeof(ProjectWriteTools), nameof(ProjectWriteTools.OpenProject));
 
-        Assert.DoesNotContain("workerClient", properties);
-        Assert.DoesNotContain("safety", properties);
-        Assert.Contains("operations", properties);
+        Assert.Contains("projectPath", properties);
+        Assert.Contains("dryRun", properties);
+        Assert.DoesNotContain("acknowledge", properties);
+        Assert.DoesNotContain("confirm", properties);
+    }
+
+    [Fact]
+    public void RegisteredWriteToolSurface_ExposesExactlySixLifecycleTools()
+    {
+        var toolNames = new[] { typeof(ProjectWriteTools) }
+            .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
+            .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
+            .Where(attribute => attribute is not null)
+            .Select(attribute => attribute!.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "archive_project",
+                "close_project",
+                "create_project",
+                "open_project",
+                "save_project",
+                "save_project_as"
+            },
+            toolNames);
     }
 
     [Fact]
@@ -231,7 +282,7 @@ public class McpToolSchemaTests
             "NetworkWrite");
 
         Assert.Equal(
-            new[] { "confirm", "operations", "safetyToken" },
+            new[] { "dryRun", "operations" },
             properties.OrderBy(name => name).ToArray());
         Assert.DoesNotContain("workerClient", properties);
         Assert.DoesNotContain("safety", properties);
@@ -287,7 +338,11 @@ public class McpToolSchemaTests
                 .GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()!.Description;
 
         Assert.Contains("deviceItem, networkInterface, and communicationConnection", DescriptionOf("ItemPath"));
-        Assert.Contains("Optional captured evidence", DescriptionOf("InterfaceName"));
+        var interfaceNameDescription = DescriptionOf("InterfaceName");
+        Assert.Contains("Optional", interfaceNameDescription);
+        Assert.Contains("exact interface-name constraint", interfaceNameDescription);
+        Assert.Contains("networkInterface kind or node kind with an owner path", interfaceNameDescription);
+        Assert.Contains("must be nonblank when supplied", interfaceNameDescription);
         Assert.Contains("Required for communicationConnection", DescriptionOf("ConnectionType"));
         Assert.Contains("Required for communicationConnection", DescriptionOf("LocalConnectionName"));
         Assert.Contains("Required for S7Connection", DescriptionOf("LocalConnectionId"));
@@ -329,16 +384,36 @@ public class McpToolSchemaTests
     }
 
     [Fact]
-    public void BrowseProjectTree_SchemaExposesOnlyModelInputs()
+    public void BrowseProjectTree_SchemaIsTheExactV3Surface()
     {
-        var properties = SchemaPropertyNames(
-            typeof(ProjectReadTools),
-            nameof(ProjectReadTools.BrowseProjectTree));
+        var tool = Tool(typeof(ProjectReadTools), nameof(ProjectReadTools.BrowseProjectTree));
+        var schema = tool.ProtocolTool.InputSchema;
+        var properties = schema.GetProperty("properties");
 
         Assert.Equal(
-            new[] { "depth", "projectPath", "startPath" },
-            properties.OrderBy(name => name).ToArray());
-        Assert.DoesNotContain("workerClient", properties);
+            new[] { "cursor", "depth", "pageSize", "projectPath", "startSelector" },
+            properties.EnumerateObject().Select(property => property.Name).Order().ToArray());
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+        Assert.False(properties.TryGetProperty("startPath", out _));
+        Assert.False(properties.TryGetProperty("deviceName", out _));
+
+        var selectorItems = properties.GetProperty("startSelector").GetProperty("items");
+        Assert.Equal(JsonValueKind.Object, selectorItems.ValueKind);
+        Assert.False(selectorItems.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal(
+            new[] { "name", "nodeType" },
+            selectorItems.GetProperty("properties").EnumerateObject()
+                .Select(property => property.Name).Order().ToArray());
+        Assert.Equal(
+            new[] { "name", "nodeType" },
+            selectorItems.GetProperty("required").EnumerateArray()
+                .Select(item => item.GetString()).Order().ToArray());
+
+        Assert.NotNull(tool.ProtocolTool.OutputSchema);
+        var method = typeof(ProjectReadTools).GetMethod(nameof(ProjectReadTools.BrowseProjectTree));
+        var attribute = method!.GetCustomAttribute<McpServerToolAttribute>();
+        Assert.True(attribute!.UseStructuredContent);
+        Assert.Equal(typeof(BrowseProjectTreeResponse), attribute.OutputSchemaType);
     }
 
     [Fact]
@@ -353,7 +428,6 @@ public class McpToolSchemaTests
             properties.OrderBy(name => name).ToArray());
         Assert.DoesNotContain("workerClient", properties);
         Assert.DoesNotContain("confirm", properties);
-        Assert.DoesNotContain("safetyToken", properties);
     }
 }
 

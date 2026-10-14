@@ -10,13 +10,14 @@ public sealed class OpennessWorkerCheck : IDiagnosticCheck
         "TiaMcpServer.Contracts.dll",
         "Microsoft.Bcl.AsyncInterfaces.dll",
         "System.Buffers.dll",
-        "System.IO.Pipelines.dll",
         "System.Memory.dll",
         "System.Numerics.Vectors.dll",
+        "System.IO.Pipelines.dll",
         "System.Runtime.CompilerServices.Unsafe.dll",
         "System.Text.Encodings.Web.dll",
         "System.Text.Json.dll",
-        "System.Threading.Tasks.Extensions.dll"
+        "System.Threading.Tasks.Extensions.dll",
+        "System.ValueTuple.dll"
     };
 
     private readonly IApplicationInfoService _appInfo;

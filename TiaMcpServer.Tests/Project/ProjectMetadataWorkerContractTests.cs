@@ -1,11 +1,10 @@
-using System.Linq;
 using System.Text.RegularExpressions;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Project;
 
 /// <summary>
-/// Source-contract tests for the production <c>TiaMcpServer.OpennessWorker.Openness.ProjectMetadataReader</c>
+/// Source-contract tests for the production <c>TiaMcpServer.OpennessWorker.Openness.Project.ProjectMetadataReader</c>
 /// and its wiring in <c>ProjectLifecycleService</c>. The worker cannot instantiate Siemens Openness
 /// objects in an ordinary unit test (Openness uses .NET remoting that only works inside a real
 /// TIA Portal-attached process), so these tests read the production source text and assert the
@@ -14,10 +13,10 @@ namespace TiaMcpServer.Tests.Project;
 public class ProjectMetadataWorkerContractTests
 {
     private static string ReaderSource => File.ReadAllText(
-        FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "ProjectMetadataReader.cs"));
+        FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "Project", "ProjectMetadataReader.cs"));
 
     private static string LifecycleServiceSource => File.ReadAllText(
-        FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "ProjectLifecycleService.cs"));
+        FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "Project", "ProjectLifecycleService.cs"));
 
     [Fact]
     public void Reader_IsAReadOnlyServiceThatNeverMutatesProjectState()
@@ -145,8 +144,8 @@ public class ProjectMetadataWorkerContractTests
         Assert.Contains("status.Metadata = ProjectMetadataReader.Read(project);", source, StringComparison.Ordinal);
 
         // The write-side current-state probe (ProbeStatusForLifecycle) and the lifecycle
-        // result/close payloads stay on plain ReadStatus, so their payloads and safety-token
-        // binding are byte-for-byte unchanged.
+        // result/close payloads stay on plain ReadStatus, so lifecycle guards and verification
+        // never enumerate extended metadata.
         Assert.Contains("ProbeStatusForLifecycle", source, StringComparison.Ordinal);
         Assert.Contains("private static ProjectStatusInfo ReadStatus(Project project)", source, StringComparison.Ordinal);
     }
@@ -160,7 +159,7 @@ public class ProjectMetadataWorkerContractTests
         // gate as GetStatusReadOnly but returning plain ReadStatus, so a write never enumerates
         // history, queries the V21 settings providers, or surfaces metadata warnings.
         Assert.Contains("GetBasicStatusReadOnly", source, StringComparison.Ordinal);
-        Assert.Contains("public static ProjectStatusInfo GetBasicStatusReadOnly(TiaPortalSession session, string? requestedProjectPath)", source, StringComparison.Ordinal);
+        Assert.Contains("public static ProjectStatusInfo GetBasicStatusReadOnly(TiaPortalSession session, string? requestedProjectPath,", source, StringComparison.Ordinal);
 
         // The metadata reader is invoked in exactly one place (ReadStatusWithMetadata, reachable
         // only from GetStatusReadOnly): the basic-status read and the lifecycle probe cannot
@@ -170,28 +169,44 @@ public class ProjectMetadataWorkerContractTests
         // The basic-status read must return plain ReadStatus, never the metadata-bearing variant.
         var basicStatusBody = source.Substring(
             source.IndexOf("public static ProjectStatusInfo GetBasicStatusReadOnly", StringComparison.Ordinal),
-            source.IndexOf("private static Project? ResolveProjectForRead", StringComparison.Ordinal)
+            source.IndexOf("private static ActiveProjectContext? ResolveProjectForRead", StringComparison.Ordinal)
                 - source.IndexOf("public static ProjectStatusInfo GetBasicStatusReadOnly", StringComparison.Ordinal));
         Assert.DoesNotContain("ProjectMetadataReader", basicStatusBody, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void LifecycleWriteTools_PostWriteVerification_UsesBasicStatusReadNotMetadataRead()
+    public void LifecycleService_GuardProbeUsesTheReadOnlyBasicStatusRoute()
     {
-        var writeToolsSource = File.ReadAllText(
-            FindRepositoryFile("TiaMcpServer", "Tools", "ProjectWriteTools.cs"));
-        var lifecycleToolsSource = File.ReadAllText(
-            FindRepositoryFile("TiaMcpServer", "Tools", "ProjectLifecycleTools.cs"));
+        var source = LifecycleServiceSource;
+        var start = source.IndexOf("public static ProjectStatusInfo ProbeStatusForLifecycle", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var end = source.IndexOf('}', start);
+        Assert.True(end > start);
+        var probe = source.Substring(start, end - start);
 
-        // The five write tools (open/create/save/save-as/archive) verify with the basic-status
-        // read only: ProjectWriteTools never calls GetProjectStatusAsync (the extended-metadata
-        // read) at all; ProjectLifecycleTools calls it exactly once, and only in its direct-read
-        // GetProjectStatus method - never in a post-write verification path. Each write tool uses
-        // GetBasicProjectStatusAsync exactly once.
-        Assert.Equal(0, CountOccurrences(writeToolsSource, "GetProjectStatusAsync"));
-        Assert.Equal(1, CountOccurrences(lifecycleToolsSource, "GetProjectStatusAsync"));
-        Assert.Equal(5, CountOccurrences(writeToolsSource, "GetBasicProjectStatusAsync"));
-        Assert.Equal(5, CountOccurrences(lifecycleToolsSource, "GetBasicProjectStatusAsync"));
+        Assert.Contains("return GetBasicStatusReadOnly(session, projectPath);", probe, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnsureProject", probe, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProjectMetadataReader", probe, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GuardedLifecycle_StatusReadsUseBasicStatusWithoutExtendedMetadata()
+    {
+        var domain = File.ReadAllText(
+            FindRepositoryFile("TiaMcpServer", "ProjectLifecycle", "LifecycleWriteDomain.cs"));
+        var binding = File.ReadAllText(
+            FindRepositoryFile("TiaMcpServer", "ProjectLifecycle", "LifecycleBindingStrategy.cs"));
+        var tools = File.ReadAllText(
+            FindRepositoryFile("TiaMcpServer", "Tools", "ProjectWriteTools.cs"));
+
+        // Domain guard planning and verification use basic status. The strategy retains the
+        // client's existing source-grounding boundary without adding another metadata reader.
+        Assert.Contains("GetBasicProjectStatusAsync(", domain, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetProjectStatusAsync(", domain, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetProjectStatusAsync(", binding, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProjectMetadataReader", domain + binding + tools, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetProjectStatusAsync(", tools, StringComparison.Ordinal);
+        Assert.DoesNotContain("SafetyRead", domain + binding + tools, StringComparison.Ordinal);
     }
 
     private static int CountOccurrences(string source, string value)
@@ -211,7 +226,7 @@ public class ProjectMetadataWorkerContractTests
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "TiaMcpServer.sln")))
+            if (File.Exists(Path.Combine(directory.FullName, "TiaMcpServer.slnx")))
             {
                 return Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray());
             }

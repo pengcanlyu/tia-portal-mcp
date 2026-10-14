@@ -1,5 +1,6 @@
-using TiaMcpServer.Contracts;
 using TiaMcpServer.Worker;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Contracts.Worker;
 
 namespace TiaMcpServer.Safety;
 
@@ -35,5 +36,5 @@ public sealed class OperationAccessPolicy
             $"Operation '{operation}' is disabled because this MCP server is running in {ModeLabel()} mode.");
     }
 
-    private string ModeLabel() => Mode == McpAccessMode.ReadOnly ? "read-only" : "read-write";
+    private string ModeLabel() => McpAccessModeNames.ToName(Mode);
 }

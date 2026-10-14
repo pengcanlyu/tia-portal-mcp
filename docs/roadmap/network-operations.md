@@ -1,5 +1,13 @@
 # Network Operations Roadmap
 
+Current guarded migration: implemented with focused offline qualification; the 2026-10-05
+live-defect fixes were live accepted on V21 (see the
+[improvement log](../IMPROVEMENT_LOG.md)); final combined gates remain pending. Version `1.0`, warnings/explicit nulls and
+`dryRun` replace Network tokens; **omitting dryRun executes**. Historical Phase4/worker-only
+qualification below applies only to recorded frozen sources. See the
+[guarded Network design](../superpowers/specs/2026-10-03-network-json-guarded-write-design.md) and
+[implementation plan](../superpowers/plans/2026-10-03-network-json-guarded-write.md).
+
 Status: Phases 1 and 2 are complete. Phase 3 implementation and its separately authorized,
 read-only TIA Portal V21 evidence run are complete, but final stabilization is pending design
 review because only three of eight observed communication connections had complete selectors.
@@ -9,15 +17,25 @@ and the operation is retained. See
 [../SupportedOperations/NETWORK_PHASE3_LIVE_ACCEPTANCE.md](../SupportedOperations/NETWORK_PHASE3_LIVE_ACCEPTANCE.md)
 for the evidence and explicit coverage gaps.
 
-Phase 4 (Ethernet/PROFIBUS subnet create/update/delete) is implemented and statically verified:
-both the stub and real V21 reference builds pass, the full test suite passes, and a whole-plan
-contract audit against the plan's Locked Public Contract found no discrepancy. Phase 4 is **not**
-live-verified — a separately authorized public-path run against a real TIA Portal V21 project
-(Task 10 of
-`docs/superpowers/plans/2026-08-06-network-phase4-subnet-lifecycle.md`) is still outstanding. See
-[../SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md](../SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md)
-for the full contract and evidence status. Phases 5 and later remain open and are separate,
-not-yet-scheduled work.
+Phase 4 (Ethernet/PROFIBUS subnet create/update/delete) is implemented. The earlier static audit
+found contract gaps that PR 1 repaired. The 2026-09-23 public run was incomplete after a TIA
+safety-permission rejection. After the disposable copy was reopened without saving and the user
+logged into safety, the 2026-09-24 guarded public rerun passed Inventory, Preview, all eight
+create/update/delete operations including both connected deletes, and a separate final Inventory.
+It observed zero subnets and the same 81 aggregate hardware devices; retained-device identities
+and node/IO-system attributes were not independently read back. This is a bounded live PASS for
+the frozen candidate. See the
+[current-revision live report](../superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md)
+and [Phase 4 operation reference](../SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md)
+for the full contract and evidence status. Phase 5 PR 2 worker-only fixture and hardware-compile
+qualification completed on 2026-09-26; public IO-system editing and Phases 6 and later remain open.
+The Portal matrix ran at `03bf387`, not at the later branch HEAD. After
+post-live project/CI changes, no `.cs` or `.ps1` file changed; the rebuilt
+dependency manifest matched, while five of 53 PE files differed. The user
+accepted those changes as having no live impact, and the fresh full coverage
+suite passed 3,371/3,371 with line rate 0.9409 against 0.80. PR 2 is
+merge-ready on that explicit source/behavioral-equivalence decision; no merge
+or current-HEAD Portal run is claimed.
 
 Phase 2 completion is scoped narrowly: Tasks 1-7 of
 `docs/superpowers/plans/2026-08-02-network-operations-phase2-json-contract.md` are implemented and
@@ -25,11 +43,10 @@ their automated gates pass — the stub build, `dotnet test TiaMcpServer.Tests`,
 protocol tests (including the multi-homed read-select-preview-apply-read proof and the
 protocol-error stop proof), and the schema/catalog/access-mode tests. It is **not** based on any
 live TIA Portal V21 acceptance run: per the plan's Global Constraints, "a compile, stub build,
-FakeWorker run, or contract test is not evidence of live TIA behavior." The separately authorized
-live harness at `scripts/live-test-network-phase2.ps1` (Task 8) is available to run under that
-separate authorization gate whenever live evidence is wanted, but its absence does not block this
-Phase 2 completion mark, and its presence does not itself constitute live-verified evidence until
-someone actually runs it against real TIA Portal V21 and records the result.
+FakeWorker run, or contract test is not evidence of live TIA behavior." The legacy acceptance
+procedure was removed without being run. This does not block the Phase 2 completion mark, but live
+evidence remains absent until a newly reviewed, separately authorized procedure is run against
+real TIA Portal V21 and its result is recorded.
 
 This document records the architectural direction and delivery sequence. It is not
 a detailed implementation plan. Task-level design, acceptance criteria, and file-by-file
@@ -40,7 +57,7 @@ steps will be produced later.
 Create a first-class, agent-friendly network engineering surface that:
 
 - separates network operations from the generic read and write batch tools;
-- preserves preview-before-apply safety for every write;
+- supports explicit dry-run inspection and guarded single-call execution with exact verified binding;
 - exposes structured JSON that agents can inspect and transform reliably, per the completed
   Phase 2 contract gate below; and
 - exposes the completed Phase 3 snapshot-scoped discovery and typed read-only inspection surface
@@ -55,15 +72,16 @@ The current implemented surface remains documented in
 
 The implemented domain tools are:
 
-- `network_read`: batch network reads, registered in both read-only and read-write modes.
-- `network_write`: a self-previewing batch write tool, registered only in read-write mode.
+- `network_read`: batch network reads, registered in all three access modes.
+- `network_write`: guarded ordered writes, registered in read-write and full modes, no server elicitation.
 
-Calling `network_write` without confirmation returns a preview and safety token. Calling
-the same tool again with `confirm=true`, the unchanged operation list, and that token
-applies the batch. Existing token expiry, single-use behavior, project-state binding,
-auditing, and access-mode enforcement remain mandatory.
+`network_write(operations, dryRun=false)` executes by default; preview explicitly with `dryRun:true`.
+Reject legacy confirmation/token/acknowledge and unknown root keys or nonboolean dryRun before
+entry (normal MCP error, no audit). Entered denials are canonical and audited once. Exact current
+already-open verified binding, caller order/stop on failure, no rollback/replay, complete consequence
+guards and typed applied-subset verification govern execution. No tool uses safety tokens; the generic batch tools were retired in favor of `plc_read`/`plc_write`.
 
-The following operations have moved out of the generic batch surface:
+The following operations moved out of the (since retired) generic batch surface:
 
 - `read_hardware_config`
 - `search_equipment_catalog`
@@ -93,14 +111,14 @@ Contract evaluation will cover:
 - deterministic object selectors suitable for subsequent writes;
 - typed attribute values and access metadata;
 - explicit warnings, failures, omissions, and truncation markers; and
-- canonical serialization for safety-token and current-state snapshots.
+- canonical serialization for guarded effects, typed verification and exact audit documents.
 
 Representative contract tests will exercise:
 
 1. Network read results as single-layer structured JSON.
 2. Serialize-deserialize-serialize stability for network contracts.
 3. Translation of selected writable read fields into a write request.
-4. Preview, canonical safety binding, apply result, and post-read comparison.
+4. Explicit dry-run effects, pinned verified binding, applied result and post-read comparison.
 5. Rejection of unknown, read-only, ambiguous, or incorrectly typed writes.
 
 The read model and write model do not need to be identical. Reads may contain derived,
@@ -111,7 +129,7 @@ model is an explicit operation containing a deterministic target and intended ch
 network_read snapshot
         -> agent selects intended changes
         -> network_write target + changes
-        -> preview -> confirm -> apply -> post-read
+        -> dryRun:true -> authorized dryRun:false -> typed verification/fresh inspection
 ```
 
 An editable whole-network document may be evaluated later, after the explicit operation
@@ -131,7 +149,7 @@ their behavior is suitable.
 
 Completed: `network_read` and `network_write` both declare an MCP output schema and return one
 canonical JSON document identically in `content` and `structuredContent` — no nested JSON string
-anywhere in the response. `network_write` is a discriminated `preview | apply | error` envelope.
+anywhere in the response. That historical Network envelope used `preview | apply | error`; the current guarded envelope uses `preview | applied | blocked | error`.
 Configure operations use nested `target: { deviceName, nodeId }` and
 `changes: { ipAddress?, subnetMask?, pnDeviceName?, subnet?: { subnetId }, ioSystem?: { subnetId, number } }`
 with no flat legacy alias. Selector resolution (device, node, subnet, IO system) is exact and
@@ -168,12 +186,13 @@ did not cover PROFIBUS/DP or non-HMI communication-connection classes. These are
 and selectability limits, not evidence that the corresponding Siemens capabilities are absent.
 This phase does not certify commissioning or live hardware behavior.
 
-### Phase 4: Add First-Class Subnet Lifecycle Operations — Statically Complete
+### Phase 4: Add First-Class Subnet Lifecycle Operations — Bounded Live PASS
 
 Completed: `network_write` adds `create_subnet`, `update_subnet`, and `delete_subnet` without a new
 MCP tool. Scope is Ethernet and PROFIBUS subnets only, selected for update/delete by exact ordinal
-`subnetId` with no name or index fallback. PROFIBUS-only `highestAddress` (0-126) and the closed
-ten-symbol `transmissionSpeed` vocabulary are validated at both the host and worker boundary.
+`target.kind: "subnet"` and `subnetId` with no name or index fallback. PROFIBUS-only
+`highestAddress` (0-126) and the closed ten-symbol `transmissionSpeed` vocabulary are validated
+at both the host and worker boundary.
 Deleting a connected subnet is supported and never deletes devices; it does not enumerate dependent
 nodes, IO systems, or communication connections. Each operation runs inside one Openness
 `ExclusiveAccess`/`Transaction`, commits only after every requested setter succeeds, and verifies
@@ -190,18 +209,32 @@ the public contract was settled) are recorded in
 The full request/result contract, targeting rules, and current evidence status are documented in
 [../SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md](../SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md).
 
-This mark reflects Tasks 1-9 of
-`docs/superpowers/plans/2026-08-06-network-phase4-subnet-lifecycle.md` and their automated gates
-(both stub and real V21 reference builds, the full `TiaMcpServer.Tests` suite, and a whole-plan
-contract audit against the plan's Locked Public Contract) passing — not a live TIA Portal V21
-acceptance run. Task 10, the separately authorized public-path live acceptance run, is outstanding
-and is reserved for explicit user authorization; it is not scheduled by this roadmap update.
+The original static completion mark covered Tasks 1-9 of
+`docs/superpowers/plans/2026-08-06-network-phase4-subnet-lifecycle.md`. The subsequent audit found
+four contract gaps; PR 1 repairs them and restores a guarded public harness. The first
+current-revision public run on 2026-09-23 failed at connected Ethernet deletion after isolated
+operations passed. The fresh 2026-09-24 run passed both connected deletes and its post-read, with
+the evidence limits above; see the
+[live report](../superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md).
 
 ### Phase 5: Add IO-System Attribute Editing
 
-Support relevant PROFINET IO-system and DP master-system modeled and dynamic attributes.
-Validate known constraints before apply, then compile hardware because Openness can accept
-some values that TIA compilation later rejects.
+The 2026-09-26 PR 2 worker-only live matrix qualified PN and DP `Name`/`Number` and PN
+`UseIoSystemNameAsDeviceNameExtension` as candidates for later public slices. The exact
+controller interface owner and separate strict ancestor master PLC hardware compile target
+were proved for both fixtures. Baseline and successful edit/restoration hardware compiles
+were observed; the PN extension toggle also changed and restored a linked PN device name.
+PN `MultipleUseIoSystem` remains excluded because a committed toggle made that linked name
+unavailable before compile. `MaxNumberIWlanLinksPerSegment` remains excluded as an unknown
+attribute in this fixture; no DP dynamic field was admitted. See the
+[qualified contract](../superpowers/specs/2026-09-24-network-phase5-qualified-contract.md)
+and [bounded live report](../superpowers/acceptance/reports/2026-09-24-network-phase5-pr2-qualification.md).
+
+The temporary `probe_io_system_qualification` produced that
+evidence, but add no public operation. `update_io_system` is still unshipped. Later modeled
+and dynamic slices require their own plans from merged `main`, strict TDD, guarded-pipeline dry-run
+and audit gates, and scope-specific live acceptance. A known committed post-read or hardware
+compile failure must be reported truthfully; no live failed compile was induced in PR 2.
 
 ### Phase 6: Add Generic Network Attribute Operations
 
@@ -213,7 +246,7 @@ changes in typed operations rather than unrestricted free-form attribute writes.
 ### Phase 7: Verification and Documentation
 
 Verify schemas, access modes, catalogs, field forwarding, FakeWorker behavior, IPC,
-safety tokens, audit records, payload budgets, postconditions, and the stub build. Update
+guarded effects/binding, audit records, payload budgets, postconditions, and the stub build. Update
 the supported-operations documentation only as capabilities are actually delivered.
 
 Live TIA Portal V21 acceptance is a separate, explicitly authorized gate. Static tests,
@@ -229,7 +262,7 @@ commissioning behavior.
   values to undifferentiated strings.
 - Never silently ignore an unknown or non-writable field.
 - Keep read diagnostics and missing-data evidence instead of synthesizing values.
-- Bind write previews to canonical requested intent and current project state.
+- Resolve exact requested intent/current state under a pinned verified binding; a dry run reserves no state.
 - Return enough postcondition evidence for an agent to verify what changed.
 
 ## Implementation Anchors
@@ -241,10 +274,10 @@ Start later-phase implementation planning from these existing seams:
 - `TiaMcpServer/Network/NetworkWriteTools.cs`
 - `TiaMcpServer/OperationBatches/`
 - `TiaMcpServer/Worker/OpennessWorkerClient.cs`
-- `TiaMcpServer.Contracts/WorkerRequest.cs`
+- `TiaMcpServer.Contracts/Worker/WorkerRequest.cs`
 - `TiaMcpServer.OpennessWorker/Program.cs`
-- `TiaMcpServer.OpennessWorker/Openness/HardwareConfigReader.cs`
-- `TiaMcpServer.OpennessWorker/Openness/NetworkDeviceConfigurator.cs`
+- `TiaMcpServer.OpennessWorker/Openness/Network/HardwareConfigReader.cs`
+- `TiaMcpServer.OpennessWorker/Openness/Network/NetworkDeviceConfigurator.cs`
 - network DTOs under `TiaMcpServer.Contracts/`
 
 ## Deferred Scope

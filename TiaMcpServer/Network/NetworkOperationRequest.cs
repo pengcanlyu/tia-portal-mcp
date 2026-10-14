@@ -33,7 +33,7 @@ public sealed class NetworkOperationRequest : IOperationBatchItem
     [Description("Network operation to run: read_hardware_config, search_equipment_catalog, add_network_device, configure_network_device, list_network_objects, inspect_network_object, create_subnet, update_subnet, or delete_subnet.")]
     public string Operation { get; set; } = string.Empty;
 
-    [Description("Optional absolute project path (.ap21). When omitted, the active project is used; all network writes in one request must share it.")]
+    [Description("Optional absolute .ap21 project or .amc21 local-session engineering path. When omitted, the active project is used; all network writes in one request must share it.")]
     public string? ProjectPath { get; set; }
 
     [Description("Hardware catalog search query. Required by search_equipment_catalog.")]
@@ -45,11 +45,20 @@ public sealed class NetworkOperationRequest : IOperationBatchItem
     [Description("Exact equipment catalog type identifier. Required by add_network_device.")]
     public string? TypeIdentifier { get; set; }
 
-    [Description("Name for the new network device or device-scoped filter for list_network_objects. Required by add_network_device; for list_network_objects it is allowed only when every requested kind is deviceItem, networkInterface, node, or communicationConnection.")]
+    [Description("Name for the new network device or device-scoped filter for list_network_objects. Required by add_network_device; for list_network_objects it is allowed only when every requested kind is deviceItem, networkInterface, node, or communicationConnection. For read_hardware_config: optional ordinal-ignore-case device filter — exactly one match reads only that device; zero or multiple matches report a non-fatal message and no devices. As a filter it names the station/root device as reported in read_hardware_config devices[].name, not a PLC/CPU device-item name; use plcName only for tag matching.")]
     public string? DeviceName { get; set; }
 
     [Description("Optional device item name for add_network_device; defaults to deviceName when omitted.")]
     public string? DeviceItemName { get; set; }
+
+    [Description("Optional PLC software name for read_hardware_config tag matching. Exact ordinal match; when omitted, tag matching uses a PLC only when exactly one PLC exists. Blank when supplied is rejected.")]
+    public string? PlcName { get; set; }
+
+    [Description("Optional read_hardware_config flag: when true, each device item carries structured ioDetails (addresses and channels). Defaults to false; detailed output can be large, so prefer deviceName filtering or split calls.")]
+    public bool? IncludeIoDetails { get; set; }
+
+    [Description("Optional read_hardware_config flag: when true, each channel carries tagMatches resolved against the selected PLC's tag tables. Requires includeIoDetails=true; defaults to false.")]
+    public bool? IncludeTagMatches { get; set; }
 
     [Description("Exact existing object to configure or inspect. Required by configure_network_device and inspect_network_object.")]
     public NetworkObjectTarget? Target { get; set; }
@@ -64,10 +73,10 @@ public sealed class NetworkOperationRequest : IOperationBatchItem
     [Description("One or more network object kinds to enumerate. Required by list_network_objects. Valid values: deviceItem, networkInterface, node, subnet, ioSystem, communicationConnection.")]
     public IReadOnlyList<string>? ObjectKinds { get; set; }
 
-    [Description("Maximum number of objects to return in one page (1–200). Optional for list_network_objects.")]
+    [Description("Maximum number of objects to return in one page (1–200). Optional for read_hardware_config and list_network_objects.")]
     public int? PageSize { get; set; }
 
-    [Description("Opaque pagination cursor returned by a previous list_network_objects call. Optional for list_network_objects.")]
+    [Description("Opaque pagination cursor returned by a previous read_hardware_config or list_network_objects call. Optional for those operations.")]
     public string? Cursor { get; set; }
 
     [Description("Attribute names to read on the inspected object. Optional for inspect_network_object; must be non-empty when supplied and must contain at most 200 unique names.")]
@@ -92,16 +101,19 @@ public sealed class NetworkOperationRequest : IOperationBatchItem
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed class NetworkObjectTarget
 {
-    [Description("Network object kind. One of: deviceItem, networkInterface, node, subnet, ioSystem, communicationConnection. For configure_network_device, only 'node' or absent is accepted.")]
+    [Description("Preferred node owner path from the device root to the item providing its NetworkInterface service. Nonempty; each segment requires nonblank name and nonnegative positionNumber, with optional nonblank typeIdentifier. Cannot be combined with itemPath.")]
+    public IReadOnlyList<NetworkInterfacePathSegment>? InterfacePath { get; set; }
+
+    [Description("Network object kind. One of: deviceItem, networkInterface, node, subnet, ioSystem, communicationConnection. For configure_network_device, only 'node' or absent is accepted. For update_subnet and delete_subnet, kind is required and must be exactly 'subnet'.")]
     public string? Kind { get; set; }
 
     [Description("Exact device name. Required for deviceItem, networkInterface, node, and communicationConnection kinds.")]
     public string? DeviceName { get; set; }
 
-    [Description("Path through the device item hierarchy. Required and non-empty for deviceItem, networkInterface, and communicationConnection kinds; every segment requires a non-negative index and positionNumber plus a nonblank name. For deviceItem inspection only, typeIdentifier may be empty when TIA does not expose it; all other path evidence remains mandatory.")]
+    [Description("Path through the device item hierarchy. Required and non-empty for deviceItem, networkInterface, and communicationConnection kinds; every segment requires a non-negative index and positionNumber plus nonblank name and typeIdentifier.")]
     public IReadOnlyList<NetworkDeviceItemPathSegment>? ItemPath { get; set; }
 
-    [Description("Optional captured evidence for networkInterface kind; must be nonblank when supplied.")]
+    [Description("Optional exact interface-name constraint for networkInterface kind or node kind with an owner path; must be nonblank when supplied.")]
     public string? InterfaceName { get; set; }
 
     [Description("Network interface type (e.g. PROFINET, PROFIBUS). Optional for networkInterface kind.")]
@@ -113,7 +125,7 @@ public sealed class NetworkObjectTarget
     [Description("Exact nodeId reported by read_hardware_config. Required for node kind and configure_network_device.")]
     public string? NodeId { get; set; }
 
-    [Description("Optional zero-based sibling index within the network interface selected by itemPath. For node kind, nodeIndex and itemPath must be supplied together.")]
+    [Description("Optional nonnegative consistency index within the selected owner's nodes. Required with legacy itemPath for node kind; optional with interfacePath. Requires an owner path.")]
     public int? NodeIndex { get; set; }
 
     [Description("Exact subnetId reported by read_hardware_config. Required for subnet and ioSystem kinds.")]
@@ -146,7 +158,7 @@ public sealed class NetworkObjectTarget
 /// are rejected to prevent silent misidentification.
 ///
 /// <para>
-/// Carries the same four evidence fields as <see cref="TiaMcpServer.Contracts.DeviceItemPathSegmentInfo"/>
+/// Carries the same four evidence fields as <see cref="TiaMcpServer.Contracts.Network.DeviceItemPathSegmentInfo"/>
 /// so a selector embedded in a <c>read_hardware_config</c> result can be forwarded directly into an
 /// inspect request without field transformation.
 /// </para>
@@ -163,8 +175,19 @@ public sealed class NetworkDeviceItemPathSegment
     [Description("Position number of the module at this level of the device hierarchy.")]
     public int? PositionNumber { get; set; }
 
-    [Description("Type identifier of the module at this level of the device hierarchy. May be empty only for inspect_network_object with kind=deviceItem when TIA does not expose it.")]
+    [Description("Type identifier of the module at this level of the device hierarchy.")]
     public string TypeIdentifier { get; set; } = string.Empty;
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class NetworkInterfacePathSegment
+{
+    [Description("Exact ordinal name of the item at this owner-path level; required and nonblank.")]
+    public string Name { get; set; } = string.Empty;
+    [Description("Position number at this owner-path level; required and nonnegative.")]
+    public int? PositionNumber { get; set; }
+    [Description("Optional captured type identifier used as an extra consistency constraint; nonblank when supplied.")]
+    public string? TypeIdentifier { get; set; }
 }
 
 /// <summary>What to set on the targeted node. Every member is optional; null means no change.</summary>
@@ -179,6 +202,9 @@ public sealed class NetworkDeviceChanges
 
     [Description("New PROFINET device name for the targeted node. Omit to leave it unchanged.")]
     public string? PnDeviceName { get; init; }
+
+    [Description("Optional boolean for the node's 'Generate PROFINET device name automatically' setting, written before pnDeviceName. Pass false together with pnDeviceName when the node generates its name automatically; otherwise that request fails before any change. Omit to leave it unchanged.")]
+    public bool? PnDeviceNameAutoGeneration { get; init; }
 
     [Description("Subnet to connect the targeted node to. Omit to leave the connection unchanged.")]
     public NetworkSubnetTarget? Subnet { get; init; }

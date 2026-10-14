@@ -1,7 +1,6 @@
 using System.Text.Json;
 using TiaMcpServer.Diagnostics;
 using TiaMcpServer.Diagnostics.Checks;
-using TiaMcpServer.Worker;
 
 namespace TiaMcpServer.Cli;
 
@@ -13,8 +12,8 @@ public static class DoctorCommand
         Options:
           --json          Emit a single JSON document to stdout.
           --verbose       Include additional evidence.
-          --project       Informational project binding (does not start the MCP host).
-          --access-mode   Report diagnostics for read-only or read-write mode.
+          --project       Validate an exact .ap21 binding without opening or attaching to TIA Portal.
+          --access-mode   Report diagnostics for read-only, read-write, or full mode.
           --read-only     Alias for --access-mode read-only.
           --read-write    Alias for --access-mode read-write.
           --help          Show command usage and exit.
@@ -97,6 +96,8 @@ public static class DoctorCommand
         var processes = ProcessEnumerationService.Instance;
         var identity = WindowsIdentityService.Instance;
 
+        var hasConfiguredProjectBinding = ProjectBindingCheck.HasConfiguredBinding(env, options.ProjectPath);
+
         var checks = new List<IDiagnosticCheck>
         {
             new OperatingSystemCheck(appInfo),
@@ -107,8 +108,12 @@ public static class DoctorCommand
             new OpennessGroupCheck(identity),
             new OpennessWorkerCheck(appInfo, fileSystem),
             new HostWorkerVersionCheck(appInfo, fileSystem),
-            new TiaPortalProcessCheck(processes, appInfo),
-            new ProjectBindingCheck(env, options.ProjectPath)
+            new TiaPortalProcessCheck(
+                processes,
+                appInfo,
+                options.AccessMode,
+                hasConfiguredProjectBinding),
+            new ProjectBindingCheck(env, fileSystem, options.ProjectPath, options.AccessMode)
         };
 
         return new DoctorRunner(appInfo, checks);

@@ -1,3 +1,5 @@
+using TiaMcpServer.Contracts.Safety;
+
 namespace TiaMcpServer.Diagnostics.Checks;
 
 public sealed class TiaPortalProcessCheck : IDiagnosticCheck
@@ -12,11 +14,19 @@ public sealed class TiaPortalProcessCheck : IDiagnosticCheck
 
     private readonly IProcessEnumerationService _processes;
     private readonly IApplicationInfoService _appInfo;
+    private readonly McpAccessMode _accessMode;
+    private readonly bool _hasConfiguredProjectBinding;
 
-    public TiaPortalProcessCheck(IProcessEnumerationService processes, IApplicationInfoService appInfo)
+    public TiaPortalProcessCheck(
+        IProcessEnumerationService processes,
+        IApplicationInfoService appInfo,
+        McpAccessMode accessMode,
+        bool hasConfiguredProjectBinding)
     {
         _processes = processes;
         _appInfo = appInfo;
+        _accessMode = accessMode;
+        _hasConfiguredProjectBinding = hasConfiguredProjectBinding;
     }
 
     public string Id => "tia-portal-process";
@@ -25,6 +35,8 @@ public sealed class TiaPortalProcessCheck : IDiagnosticCheck
     public DiagnosticCheckResult Run()
     {
         var evidence = Evidence.Empty();
+        evidence["accessMode"] = McpAccessModeNames.ToName(_accessMode);
+        evidence["projectBindingConfigured"] = _hasConfiguredProjectBinding.ToString();
 
         if (!_appInfo.IsWindows)
         {
@@ -50,12 +62,31 @@ public sealed class TiaPortalProcessCheck : IDiagnosticCheck
                 evidence[$"process[{i}].id"] = matches[i].Id.ToString();
             }
 
+            if (matches.Count == 1)
+            {
+                return new DiagnosticCheckResult(
+                    Id,
+                    Name,
+                    DiagnosticStatus.Passed,
+                    "TIA Portal is running (1 process detected). Doctor did not attach or inspect its open project.",
+                    null,
+                    evidence);
+            }
+
+            var unboundWritable =
+                (_accessMode is McpAccessMode.ReadWrite or McpAccessMode.Full) && !_hasConfiguredProjectBinding;
+            var message = unboundWritable
+                ? $"Multiple TIA Portal processes were detected: {matches.Count} processes while {McpAccessModeNames.ToName(_accessMode)} mode has no explicit project binding."
+                : $"Multiple TIA Portal processes were detected: {matches.Count} processes. Doctor cannot determine which process has the intended project open without attaching.";
+
             return new DiagnosticCheckResult(
                 Id,
                 Name,
-                DiagnosticStatus.Passed,
-                $"TIA Portal is running ({matches.Count} process(es) detected).",
-                null,
+                DiagnosticStatus.Warning,
+                message,
+                _hasConfiguredProjectBinding
+                    ? "Call bind_project with the configured .ap21 project's path after confirming it is open in exactly one TIA Portal process."
+                    : "Call bind_project with the intended already-open project's exact projectPath, or configure --project, before using project tools.",
                 evidence);
         }
 

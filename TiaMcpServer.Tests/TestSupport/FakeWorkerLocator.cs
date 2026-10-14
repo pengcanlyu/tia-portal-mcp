@@ -1,4 +1,4 @@
-namespace TiaMcpServer.Tests;
+namespace TiaMcpServer.Tests.TestSupport;
 
 /// <summary>
 /// Locates the built TiaMcpServer.FakeWorker.exe by walking up from the test assembly's output
@@ -15,7 +15,7 @@ internal static class FakeWorkerLocator
             {
                 var candidate = Path.Combine(
                     directory.FullName,
-                    "TiaMcpServer.FakeWorker", "bin", configuration, "net8.0",
+                    "TiaMcpServer.FakeWorker", "bin", configuration, "net10.0",
                     "TiaMcpServer.FakeWorker.exe");
                 if (File.Exists(candidate))
                 {

@@ -36,9 +36,11 @@ Access control is inherited from the TIA Portal installation's OS-level permissi
 
 ### Write safety
 
-All write operations use a preview-then-apply workflow with single-use safety tokens bound to the exact tool name, normalized project path, requested input, and current project state. Tokens expire after 10 minutes and are rejected if reused, expired, mismatched, or if project state changes. See the README's "Write safety" section for full details.
+Every write tool uses a guarded single call under one pinned, verified project binding; no tool uses safety tokens. `plc_write` and `network_write` preview with `dryRun:true`, execute by default, and never elicit; block guards (collisions, unreadable evidence) refuse in every mode. Stale content in a `plc_write` content update fails with `state_changed`.
 
-Successful write attempts append audit JSONL records under `%LOCALAPPDATA%\TiaMcpServer\audit` for forensic review.
+Lifecycle writes use a guarded single call: read-write requires one client confirmation form per actual call; full proceeds under policy without server elicitation. Block guards refuse in every mode, and dry runs never mutate or elicit. Lifecycle, Network and PLC audit v2 records every entered call, including previews and refusals, with confirmation by `user`, `policy`, or `none`. Client-returned acceptance cannot prove that a human saw a prompt. See the README's "Write safety" section for details.
+
+Write calls append audit JSONL records under `%LOCALAPPDATA%\TiaMcpServer\audit` for forensic review.
 
 ### Supply chain
 

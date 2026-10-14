@@ -1,18 +1,13 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Json;
+using TiaMcpServer.Contracts.Network;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Network;
 
 public class HardwareConfigInfoTests
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    private static readonly JsonSerializerOptions JsonOptions = WorkerJson.PayloadOptionsFor(typeof(HardwareConfigInfo));
 
     [Fact]
     public void SerializesEmptyConfig()
@@ -25,6 +20,27 @@ public class HardwareConfigInfoTests
         Assert.NotNull(roundTripped.Subnets);
         Assert.Empty(roundTripped.Devices);
         Assert.Empty(roundTripped.Subnets);
+    }
+
+    [Fact]
+    public void UnpagedConfig_OmitsPagination()
+    {
+        var json = JsonSerializer.Serialize(new HardwareConfigInfo(), JsonOptions);
+
+        Assert.DoesNotContain("pagination", json);
+    }
+
+    [Fact]
+    public void PagedConfig_SerializesPaginationMetadata()
+    {
+        var json = JsonSerializer.Serialize(
+            new HardwareConfigInfo
+            {
+                Pagination = new HardwarePaginationInfo(10, 3, 2, 1, null),
+            },
+            JsonOptions);
+
+        Assert.Contains("\"pagination\":{\"totalDevices\":10,\"totalSubnets\":3,\"returnedDevices\":2,\"returnedSubnets\":1}", json);
     }
 
     [Fact]
@@ -156,7 +172,9 @@ public class HardwareConfigInfoTests
         var json = JsonSerializer.Serialize(item, JsonOptions);
         var roundTripped = JsonSerializer.Deserialize<DeviceItemInfo>(json, JsonOptions);
 
-        Assert.DoesNotContain("address", json);
+        // HardwareConfigInfo no longer carries [LegacyNullOmission(RequiredMemberEnforcement)]
+        // (Task 3): a null Address is now written explicitly instead of omitted.
+        Assert.Contains("\"address\":null", json);
         Assert.NotNull(roundTripped);
         Assert.Null(roundTripped.Address);
     }
@@ -335,8 +353,8 @@ public class HardwareConfigInfoTests
         Assert.Equal(new[] { "0", "1" }, nodes.Select(node => node.NodeId));
         Assert.Equal(2, nodes.Select(node => node.NodeId).Distinct().Count());
 
-        var plcFacing = Assert.Single(nodes.Where(node => node.NodeId == "0"));
-        var clientDatabaseFacing = Assert.Single(nodes.Where(node => node.NodeId == "1"));
+        var plcFacing = Assert.Single(nodes, node => node.NodeId == "0");
+        var clientDatabaseFacing = Assert.Single(nodes, node => node.NodeId == "1");
 
         Assert.Equal("192.168.0.20", plcFacing.IpAddress);
         Assert.Equal("PN/IE_1", plcFacing.SubnetName);

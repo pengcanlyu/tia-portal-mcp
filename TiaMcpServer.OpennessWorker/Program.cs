@@ -1,32 +1,34 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Siemens.Engineering;
-using TiaMcpServer.Contracts;
-using TiaMcpServer.OpennessWorker.Openness;
-using TiaMcpServer.OpennessWorker.Openness.OpcUa;
-using WorkerTiaPortalSession = TiaMcpServer.OpennessWorker.Openness.TiaPortalSession;
+using TiaMcpServer.Contracts.Block;
+using TiaMcpServer.Contracts.CrossReferences;
+using TiaMcpServer.Contracts.Diagnostics;
+using TiaMcpServer.Contracts.Hmi;
+using TiaMcpServer.Contracts.Json;
+using TiaMcpServer.Contracts.Network;
+using TiaMcpServer.Contracts.Plc;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.OpennessWorker.Openness.Block;
+using TiaMcpServer.OpennessWorker.Openness.CrossReferences;
+using TiaMcpServer.OpennessWorker.Openness.Hmi;
+using TiaMcpServer.OpennessWorker.Openness.Infrastructure;
+using TiaMcpServer.OpennessWorker.Openness.Multiuser;
+using TiaMcpServer.OpennessWorker.Openness.Network;
+using TiaMcpServer.OpennessWorker.Openness.Plc;
+using TiaMcpServer.OpennessWorker.Openness.Project;
+using TiaMcpServer.OpennessWorker.Worker;
+using WorkerTiaPortalSession = TiaMcpServer.OpennessWorker.Openness.Project.TiaPortalSession;
 
 namespace TiaMcpServer.OpennessWorker;
 
 internal static class Program
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
-    private static readonly JsonSerializerOptions NetworkObjectListJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
-    };
-
     // TIA Portal 권한 요청 다이얼로그는 Attach() 호출마다 뜬다.
     // 세션을 프로세스 수명 동안 재사용해 Attach()를 최초 1회만 호출한다.
     private static readonly WorkerTiaPortalSession _sharedSession = new(allowTiaConfirmations: true);
+    private static readonly MultiuserInventoryService _sharedInventory = new(_sharedSession);
 
     private static readonly McpAccessMode _accessMode = WorkerOperationAuthorization.ParseAccessMode(
         Environment.GetCommandLineArgs());
@@ -41,14 +43,21 @@ internal static class Program
         Console.InputEncoding = System.Text.Encoding.UTF8;
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-        Console.Error.WriteLine($"TIA Openness worker access mode: {_accessMode.ToString().ToUpperInvariant()}");
+        Console.Error.WriteLine($"TIA Openness worker access mode: {McpAccessModeNames.ToName(_accessMode).ToUpperInvariant()}");
 
-        string? line;
-        while ((line = Console.In.ReadLine()) is not null)
+        try
         {
-            var response = HandleLineWithCapturedStderr(line);
-            Console.Out.WriteLine(JsonSerializer.Serialize(response, JsonOptions));
-            Console.Out.Flush();
+            string? line;
+            while ((line = Console.In.ReadLine()) is not null)
+            {
+                var response = HandleLineWithCapturedStderr(line);
+                Console.Out.WriteLine(JsonSerializer.Serialize(response, WorkerJson.Envelope));
+                Console.Out.Flush();
+            }
+        }
+        finally
+        {
+            _sharedSession.Dispose();
         }
     }
 
@@ -99,10 +108,40 @@ internal static class Program
     {
         try
         {
-            var request = JsonSerializer.Deserialize<WorkerRequest>(line, JsonOptions);
+            var request = JsonSerializer.Deserialize<WorkerRequest>(line, WorkerJson.Envelope);
             if (request is null)
             {
                 throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "Worker request was empty.");
+            }
+
+            // Protocol compatibility is established before authorization, Attach(), or any
+            // Siemens API call. This prevents a stale same-major worker from performing a
+            // lifecycle mutation and only afterwards revealing that it cannot enforce identity.
+            if (string.Equals(request.Method, "hello", StringComparison.Ordinal))
+            {
+                if (!string.Equals(request.ProtocolVersion, WorkerProtocol.Version, StringComparison.Ordinal))
+                {
+                    return Failure(
+                        WorkerFailureCategories.ValidationError,
+                        $"Worker protocol mismatch. Host requested '{request.ProtocolVersion ?? "(missing)"}', "
+                        + $"worker requires '{WorkerProtocol.Version}'.");
+                }
+
+                return new WorkerResponse
+                {
+                    Success = true,
+                    Payload = "{}",
+                    ProtocolVersion = WorkerProtocol.Version,
+                    Capabilities = WorkerProtocol.RequiredCapabilities.ToList()
+                };
+            }
+
+            if (!string.Equals(request.ProtocolVersion, WorkerProtocol.Version, StringComparison.Ordinal))
+            {
+                return Failure(
+                    WorkerFailureCategories.ValidationError,
+                    $"Worker protocol mismatch. Request carried '{request.ProtocolVersion ?? "(missing)"}', "
+                    + $"worker requires '{WorkerProtocol.Version}'. No Siemens operation was performed.");
             }
 
             // Defense in depth: authorize BEFORE the dispatch switch, before any handler
@@ -110,16 +149,30 @@ internal static class Program
             var denial = WorkerOperationAuthorization.Authorize(_accessMode, request.Method);
             if (denial is not null)
             {
-                return denial;
+                return request.Method == "update_block_logic"
+                    ? BlockUpdateOutcomeDecorator.Decorate(
+                        denial,
+                        BlockUpdateOutcomeDecorator.NormalizeFormatOrNull(request.Format),
+                        importerEntered: false)
+                    : denial;
             }
 
             return request.Method switch
             {
-                "browse_project_tree" => BrowseProjectTree(request),
+                "inspect_hardware_parameters" or "list_opcua_interfaces" or "inspect_opcua_variables" => WithEngineeringRoot(request, project => Success(TiaMcpServer.OpennessWorker.Openness.Extensions.EngineeringExtensionService.Read(project, request.EngineeringQuery!))),
+                "engineering_extension_probe" => WithEngineeringRoot(request, project => Success(TiaMcpServer.OpennessWorker.Openness.Extensions.EngineeringExtensionService.Probe(project, request.EngineeringQuery!))),
+                "set_hardware_parameters" or "generate_opcua_interface" or "set_opcua_interface_enabled" or "delete_opcua_interface" or "export_opcua_interface" or "export_plc_to_folder" => WithEngineeringRoot(request, project => Success(TiaMcpServer.OpennessWorker.Openness.Extensions.EngineeringExtensionService.Apply(project, request.EngineeringQuery!, request.ExtensionProbeHash!))),
+                "list_tia_portal_processes" => ListPortalProcesses(request),
+                "list_server_connections" or "list_server_groups" or "list_server_projects" or "list_local_sessions" or "get_lock_state"
+                    => WithPortalRead(request, _ => MultiuserPortalReadDispatch.Invoke(_sharedInventory, request)),
+                "select_portal_project" => SelectPortalProject(request),
+                "browse_project_tree_v3_snapshot" => BrowseProjectTreeV3Snapshot(request),
                 "read_hardware_config" => ReadHardwareConfig(request),
+                "read_hardware_page_candidates" => ReadHardwarePageCandidates(request),
                 "list_network_objects" => ListNetworkObjects(request),
                 "inspect_network_object" => InspectNetworkObject(request),
                 "probe_network_object_attributes" => ProbeNetworkObjectAttributes(request),
+                "probe_io_system_qualification" => ProbeIoSystemQualification(request),
                 "probe_subnet_lifecycle_mutations" => ProbeSubnetLifecycleMutations(request),
                 "search_equipment_catalog" => SearchEquipmentCatalog(request),
                 "add_network_device" => AddNetworkDevice(request),
@@ -133,6 +186,12 @@ internal static class Program
                 "get_type_content"    => GetTypeContent(request),
                 "update_type_content" => UpdateTypeContent(request),
                 "list_tag_tables"     => ListTagTables(request),
+                "hmi_list_hmi_devices" or "hmi_get_runtime_settings" or "hmi_list_script_modules"
+                    or "hmi_list_text_and_graphic_lists" or "hmi_list_project_languages" or "hmi_list_tag_tables"
+                    or "hmi_list_tags" or "hmi_get_tag" or "hmi_list_system_tags" or "hmi_list_logging_tags"
+                    or "hmi_list_connections" or "hmi_list_alarms" or "hmi_get_alarm" or "hmi_list_alarm_classes"
+                    or "hmi_list_logs" or "hmi_list_screens" or "hmi_list_screen_items" or "hmi_list_faceplate_instances"
+                    or "hmi_get_screen_navigation" or "hmi_validate" => ReadHmi(request),
                 "compile_check"       => CompileCheck(request),
                 "create_tag_table"    => CreateTagTable(request),
                 "delete_tag_table"    => DeleteTagTable(request),
@@ -144,25 +203,18 @@ internal static class Program
                 "delete_user_constant" => DeleteUserConstant(request),
                 "get_project_status"  => GetProjectStatus(request),
                 "probe_project_status_for_lifecycle" => ProbeProjectStatusForLifecycle(request),
+                "probe_open_project_rebind" => ProbeOpenProjectRebind(request),
                 "get_basic_project_status" => GetBasicProjectStatus(request),
                 "create_block"        => CreateBlock(request),
                 "delete_block"        => DeleteBlock(request),
                 "create_block_group"  => CreateBlockGroup(request),
                 "delete_block_group"  => DeleteBlockGroup(request),
-                "start_plc"           => StartPlc(request),
-                "stop_plc"            => StopPlc(request),
                 "open_project"        => OpenProject(request),
                 "create_project"      => CreateProject(request),
                 "save_project"        => SaveProject(request),
                 "save_project_as"     => SaveProjectAs(request),
                 "archive_project"     => ArchiveProject(request),
                 "close_project"       => CloseProject(request),
-                "list_opcua_interfaces" => ListOpcUaInterfaces(request),
-                "inspect_opcua_variables" => InspectOpcUaVariables(request),
-                "export_opcua_interface" => ExportOpcUaInterface(request),
-                "generate_opcua_interface" => GenerateOpcUaInterface(request),
-                "set_opcua_interface_enabled" => SetOpcUaInterfaceEnabled(request),
-                "delete_opcua_interface" => DeleteOpcUaInterface(request),
                 _ => throw new WorkerOperationException(
                     WorkerFailureCategories.ValidationError,
                     $"Unsupported worker method '{request.Method}'.")
@@ -178,7 +230,7 @@ internal static class Program
         }
         catch (WorkerOperationException ex)
         {
-            return Failure(ex.FailureCategory, ex.Message, ex.Warnings);
+            return Failure(ex.FailureCategory, ex.Message, ex.Warnings, ex.BlockImportOutcome);
         }
         catch (Exception ex)
         {
@@ -189,18 +241,89 @@ internal static class Program
         }
     }
 
-    private static WorkerResponse BrowseProjectTree(WorkerRequest request)
+    private static WorkerResponse ListPortalProcesses(WorkerRequest request)
     {
-        return WithProject(request, project =>
+        return Execute(() =>
         {
-            var tree = new ProjectTreeWalker().Walk(project);
-            return Success(ProjectTreeFilter.Apply(tree, request.StartPath, request.Depth));
+            var inventory = TiaPortalProcessInventory.Read();
+            return Success(new TiaPortalProcessListInfo
+            {
+                AttachedProcessId = _sharedSession.CurrentProcessId,
+                Processes = TiaPortalTargetSelector.ToProcessInfos(
+                    inventory.Select(entry => entry.Candidate).ToList(), _sharedSession.CurrentProcessId)
+            });
         });
+    }
+
+    private static WorkerResponse SelectPortalProject(WorkerRequest request)
+    {
+        return Execute(() =>
+        {
+            if (request.ProjectPath is not null && string.IsNullOrWhiteSpace(request.ProjectPath))
+            {
+                throw new WorkerOperationException(WorkerFailureCategories.ValidationError,
+                    "select_portal_project requires an exact projectPath when supplied.");
+            }
+
+            ValidateExpectedSessionIdentityForRequest(_sharedSession, request,
+                allowMissingExpectedIdentity: true, useCachedIdentity: true);
+            return Success(_sharedSession.SelectPortalProject(request.ProjectPath, request.PortalProcessId));
+        });
+    }
+
+    private static WorkerResponse BrowseProjectTreeV3Snapshot(WorkerRequest request)
+    {
+        try
+        {
+            ProjectTreeNodeTypes.Validate(request.StartSelector);
+            return WithEngineeringRoot(request, project =>
+            {
+                var selected = new ProjectTreeSnapshotWalker().WalkSnapshot(project, request.StartSelector, request.Depth);
+                return Success(new ProjectTreeBrowseResultInfo
+                {
+                    StartSelector = selected.CanonicalStartSelector?.ToList(),
+                    Depth = request.Depth,
+                    Roots = selected.Roots.ToList(),
+                    Skipped = selected.Skipped.ToList()
+                });
+            });
+        }
+        catch (ProjectTreeSelectionException exception)
+        {
+            throw new WorkerOperationException(exception.Category, exception.Message);
+        }
     }
 
     private static WorkerResponse ReadHardwareConfig(WorkerRequest request)
     {
-        return WithProject(request, project => Success(HardwareConfigReader.Read(project)));
+        return WithEngineeringRoot(request, project => Success(HardwareConfigReader.Read(
+            project,
+            request.DeviceName,
+            request.PlcName,
+            request.IncludeIoDetails,
+            request.IncludeTagMatches)));
+    }
+
+    private static WorkerResponse ReadHardwarePageCandidates(WorkerRequest request)
+    {
+        return WithEngineeringRoot(request, project =>
+        {
+            ValidateHardwarePageContinuationIdentity(request);
+            var source = HardwarePageCandidateSourceFactory.Create(
+                project,
+                request.DeviceName,
+                request.PlcName,
+                request.IncludeIoDetails,
+                request.IncludeTagMatches);
+            return Success(HardwarePageCandidateReader.Read(
+                source,
+                request.DeviceName,
+                request.PlcName,
+                request.IncludeIoDetails,
+                request.IncludeTagMatches,
+                request.HardwarePageSize,
+                request.HardwarePageContinuation));
+        });
     }
 
     private static WorkerResponse ListNetworkObjects(WorkerRequest request)
@@ -217,7 +340,7 @@ internal static class Program
             throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "NetworkObjectPageSize must be between 1 and 200.");
         }
 
-        return WithProject(request, project =>
+        return WithEngineeringRoot(request, project =>
         {
             var orderedItems = NetworkObjectIndexReader.Read(project, request.NetworkObjectKinds!, request.NetworkObjectDeviceName);
             var queryHash = NetworkObjectCursorCodec.CreateQueryHash(request.NetworkObjectKinds!, request.NetworkObjectDeviceName);
@@ -270,7 +393,7 @@ internal static class Program
                 "NetworkObjectTarget is required.");
         }
 
-        return WithProject(request, project =>
+        return WithEngineeringRoot(request, project =>
         {
             var resolution = NetworkObjectSelectorResolver.Resolve(project, request.NetworkObjectTarget);
             if (!resolution.Success)
@@ -286,6 +409,44 @@ internal static class Program
         });
     }
 
+    private static WorkerResponse ProbeIoSystemQualification(WorkerRequest request)
+    {
+        var validation = IoSystemQualificationProbeValidator.Validate(request);
+        if (validation is not null)
+            throw new WorkerOperationException(WorkerFailureCategories.ValidationError, validation);
+        try
+        {
+            var response = WithSession(request, session =>
+            {
+                var failure = EnsureRequestedProjectOpen(session, request.ProjectPath);
+                if (failure is not null)
+                    return Failure(failure.FailureCategory ?? WorkerFailureCategories.WorkerOperationFailed,
+                        "The requested qualification project is unavailable.");
+                ValidateExpectedAfterProjectResolution(session, request);
+                if (session.ActiveContext is null || session.TiaPortal is null)
+                    return Failure(WorkerFailureCategories.WorkerOperationFailed, "No project or Portal session is available.");
+                var probe = request.IoSystemQualification!;
+                var result = probe.Mode switch
+                {
+                    "inspectOwner" => IoSystemQualificationProbeService.InspectOwner(session.TiaPortal, session.RequireStandaloneOwner().Project, probe),
+                    "compileBaseline" => IoSystemQualificationProbeService.CompileBaseline(session.TiaPortal, session.RequireStandaloneOwner().Project, probe),
+                    "setAndCompile" => IoSystemQualificationProbeService.SetAndCompile(session.TiaPortal, session.RequireStandaloneOwner().Project, probe),
+                    _ => throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "Unsupported qualification mode.")
+                };
+                return new WorkerResponse { Success = true, Payload = IoSystemQualificationEvidence.SerializeBounded(result) };
+            });
+            return IoSystemQualificationEvidence.NormalizeSessionResponse(response, request.IoSystemQualification!.Mode);
+        }
+        catch (WorkerOperationException exception)
+        {
+            return Failure(exception.FailureCategory, "IO-system qualification was rejected. Refresh session, target, owner, and metadata evidence before proceeding.");
+        }
+        catch (Exception)
+        {
+            return Failure(WorkerFailureCategories.WorkerOperationFailed,
+                "IO-system qualification could not complete. A requested mutation may have committed; inspect current state before restoration or retry.");
+        }
+    }
     private static WorkerResponse ProbeNetworkObjectAttributes(WorkerRequest request)
     {
         if (request.NetworkObjectTarget is null)
@@ -307,7 +468,7 @@ internal static class Program
                 "NetworkAttributeNames must contain between 1 and 200 unique, nonblank names when supplied.");
         }
 
-        return WithProject(request, project =>
+        return WithEngineeringRoot(request, project =>
         {
             var resolution = NetworkObjectSelectorResolver.Resolve(project, request.NetworkObjectTarget);
             if (!resolution.Success)
@@ -417,13 +578,13 @@ internal static class Program
 
         return WithSession(request, session =>
         {
-            session.EnsureConnected();
             var failure = EnsureRequestedProjectOpen(session, request.ProjectPath);
             if (failure is not null)
             {
                 return failure;
             }
-            if (session.Project is null || session.TiaPortal is null)
+            ValidateExpectedAfterProjectResolution(session, request);
+            if (session.ActiveContext is null || session.TiaPortal is null)
             {
                 return Failure(
                     WorkerFailureCategories.WorkerOperationFailed,
@@ -432,7 +593,7 @@ internal static class Program
 
             return Success(SubnetLifecycleMutationProbeService.Run(
                 session.TiaPortal,
-                session.Project,
+                session.RequireStandaloneOwner().Project,
                 probeRunId,
                 request.ProbeConnectedEthernetSubnetId!,
                 request.ProbeConnectedProfibusSubnetId!,
@@ -450,13 +611,12 @@ internal static class Program
 
         return WithSession(request, session =>
         {
-            session.EnsureConnected();
-
             var failure = EnsureRequestedProjectOpen(session, request.ProjectPath);
             if (failure is not null)
             {
                 return failure;
             }
+            ValidateExpectedAfterProjectResolution(session, request);
 
             if (session.TiaPortal is null)
             {
@@ -490,24 +650,18 @@ internal static class Program
                 "Operation not confirmed. Set confirm=true to proceed with adding a network device.");
         }
 
-        return WithProject(request, project => Success(NetworkDeviceCreator.Create(
-            project,
-            request.TypeIdentifier!,
-            request.DeviceName!,
-            string.IsNullOrWhiteSpace(request.DeviceItemName) ? request.DeviceName! : request.DeviceItemName!)));
+        return WithEngineeringRoot(request, project =>
+        {
+            var result = NetworkDeviceCreator.Create(project, request.TypeIdentifier!, request.DeviceName!,
+                string.IsNullOrWhiteSpace(request.DeviceItemName) ? request.DeviceName! : request.DeviceItemName!);
+            result.Verification = NetworkMutationVerifier.VerifyAddedDevice(project, request, result);
+            return Success(result);
+        });
     }
 
     private static WorkerResponse ConfigureNetworkDevice(WorkerRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.DeviceName))
-        {
-            throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "DeviceName is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.NodeId))
-        {
-            throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "NodeId is required.");
-        }
+        var target = NetworkConfigurationTargetBinding.Resolve(request);
 
         if (!request.Confirm)
         {
@@ -516,16 +670,30 @@ internal static class Program
                 "Operation not confirmed. Set confirm=true to proceed with configuring a network device.");
         }
 
-        return WithProject(request, project => Success(NetworkDeviceConfigurator.Configure(
-            project,
-            request.DeviceName!,
-            request.NodeId!,
-            request.IpAddress,
-            request.SubnetMask,
-            request.PnDeviceName,
-            request.SubnetId,
-            request.IoSystemSubnetId,
-            request.IoSystemNumber)));
+        return WithEngineeringRoot(request, project =>
+        {
+            // Capture the normalized owner while retaining supplied constraints for the final
+            // pre-setter resolver. Immediate checks must not re-search a bare device namespace.
+            var prepared = NetworkObjectSelectorResolver.ResolveNode(project, target);
+            if (!prepared.Success) throw new WorkerOperationException(prepared.FailureCategory!, prepared.Error!);
+            var dispatchTarget = target.InterfacePath is not null || target.ItemPath is not null ? target : prepared.Resolved!.Target;
+            dispatchTarget.DeviceName = target.DeviceName;
+            dispatchTarget.InterfaceName = target.InterfaceName;
+            dispatchTarget.NodeIndex = target.NodeIndex;
+            var result = NetworkDeviceConfigurator.Configure(
+                project,
+                dispatchTarget,
+                request.IpAddress,
+                request.SubnetMask,
+                request.PnDeviceName,
+                request.PnDeviceNameAutoGeneration,
+                request.SubnetId,
+                request.IoSystemSubnetId,
+                request.IoSystemNumber);
+            request.NetworkObjectTarget = dispatchTarget;
+            result.Verification = NetworkMutationVerifier.VerifyConfiguration(project, request, result);
+            return Success(result);
+        });
     }
 
     private static WorkerResponse CreateSubnet(WorkerRequest request)
@@ -564,7 +732,7 @@ internal static class Program
 
         return WithSubnetLifecycleProject(request, session => Success(SubnetLifecycleService.Create(
             session.TiaPortal!,
-            session.Project!,
+            session.EngineeringRoot!,
             request.SubnetName!,
             request.SubnetNetworkType!,
             request.SubnetHighestAddress,
@@ -602,7 +770,7 @@ internal static class Program
 
         return WithSubnetLifecycleProject(request, session => Success(SubnetLifecycleService.Update(
             session.TiaPortal!,
-            session.Project!,
+            session.EngineeringRoot!,
             request.SubnetId!,
             request.SubnetName,
             request.SubnetHighestAddress,
@@ -625,7 +793,7 @@ internal static class Program
 
         return WithSubnetLifecycleProject(request, session => Success(SubnetLifecycleService.Delete(
             session.TiaPortal!,
-            session.Project!,
+            session.EngineeringRoot!,
             request.SubnetId!)));
     }
 
@@ -653,24 +821,23 @@ internal static class Program
     }
 
     /// <summary>
-    /// Shared session/project plumbing for the three subnet lifecycle operations: connects, opens
-    /// the requested project if needed, and requires both <see cref="WorkerTiaPortalSession.TiaPortal"/>
-    /// and <see cref="WorkerTiaPortalSession.Project"/> — the lifecycle service needs the portal handle
+    /// Shared session/project plumbing for the three subnet lifecycle operations: connects, selects
+    /// only an already-open project or local session, and requires both <see cref="WorkerTiaPortalSession.TiaPortal"/>
+    /// and an engineering root — the lifecycle service needs the portal handle
     /// for <c>ExclusiveAccess</c>/<c>Transaction</c>, not just the project.
     /// </summary>
     private static WorkerResponse WithSubnetLifecycleProject(WorkerRequest request, Func<WorkerTiaPortalSession, WorkerResponse> body)
     {
         return WithSession(request, session =>
         {
-            session.EnsureConnected();
-
             var failure = EnsureRequestedProjectOpen(session, request.ProjectPath);
             if (failure is not null)
             {
                 return failure;
             }
+            ValidateExpectedAfterProjectResolution(session, request);
 
-            if (session.Project is null || session.TiaPortal is null)
+            if (session.ActiveContext is null || session.TiaPortal is null)
             {
                 return Failure(
                     WorkerFailureCategories.WorkerOperationFailed,
@@ -693,8 +860,15 @@ internal static class Program
                 filterError ?? "Invalid cross-reference filter.");
         }
 
-        return WithProject(request, project => Success(
-            CrossReferenceReader.Read(project, request.PlcName, filter, request.MaxResults)));
+        if (request.CrossReferenceSelector is null)
+        {
+            throw new WorkerOperationException(
+                WorkerFailureCategories.InvalidSelector,
+                "read_cross_references requires a target selector.");
+        }
+
+        return WithEngineeringRoot(request, project => Success(
+            CrossReferenceReader.Read(project, request.CrossReferenceSelector, filter, request.MaxResults)));
     }
 
     private static WorkerResponse GetBlockContent(WorkerRequest request)
@@ -707,7 +881,7 @@ internal static class Program
         var format = NormalizeBlockFormat(request.Format);
         var withDependencies = request.WithDependencies == true;
 
-        return WithProject(request, project =>
+        return WithEngineeringRoot(request, project =>
         {
             var content = BlockExporter.Export(project, request.BlockPath!, format, withDependencies);
             return RawPayload(content, SourceReadWarnings.ForExport(withDependencies, format, content));
@@ -716,23 +890,40 @@ internal static class Program
 
     private static WorkerResponse UpdateBlockLogic(WorkerRequest request)
     {
-        if (string.IsNullOrEmpty(request.BlockPath))
+        var normalizedFormat = BlockUpdateOutcomeDecorator.NormalizeFormatOrNull(request.Format);
+        var importerEntered = false;
+        try
         {
-            throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "BlockPath is required.");
+            if (string.IsNullOrEmpty(request.BlockPath))
+            {
+                throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "BlockPath is required.");
+            }
+
+            if (string.IsNullOrEmpty(request.Content))
+            {
+                throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "Content is required.");
+            }
+
+            normalizedFormat = NormalizeBlockFormat(request.Format);
+
+            var response = WithEngineeringRoot(request, project =>
+            {
+                importerEntered = true;
+                var result = BlockImporter.Import(project, request.BlockPath!, request.Content!, normalizedFormat, request.ExpectedContentHash);
+                return RawPayload(result.Payload, result.Warnings, result.Outcome);
+            });
+            return response.Success
+                ? response
+                : BlockUpdateOutcomeDecorator.Decorate(response, normalizedFormat, importerEntered);
         }
-
-        if (string.IsNullOrEmpty(request.YamlContent))
+        catch (WorkerOperationException exception)
         {
-            throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "YamlContent is required.");
+            return BlockUpdateOutcomeDecorator.Decorate(exception, normalizedFormat, importerEntered);
         }
-
-        var format = NormalizeBlockFormat(request.Format);
-
-        return WithProject(request, project =>
+        catch (Exception exception)
         {
-            var result = BlockImporter.Import(project, request.BlockPath!, request.YamlContent!, format);
-            return RawPayload(result.Payload, result.Warnings);
-        });
+            return BlockUpdateOutcomeDecorator.Decorate(exception, normalizedFormat, importerEntered);
+        }
     }
 
     private static WorkerResponse GetTypeContent(WorkerRequest request)
@@ -745,7 +936,7 @@ internal static class Program
         var format = NormalizeTypeFormat(request.Format);
         var withDependencies = request.WithDependencies == true;
 
-        return WithProject(request, project =>
+        return WithEngineeringRoot(request, project =>
         {
             var content = PlcTypeExporter.Export(project, request.TypePath!, format, withDependencies);
             return RawPayload(content, SourceReadWarnings.ForExport(withDependencies, format, content));
@@ -759,21 +950,21 @@ internal static class Program
             throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "TypePath is required.");
         }
 
-        if (string.IsNullOrEmpty(request.SourceContent))
+        if (string.IsNullOrEmpty(request.Content))
         {
-            throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "SourceContent is required.");
+            throw new WorkerOperationException(WorkerFailureCategories.ValidationError, "Content is required.");
         }
 
         var format = NormalizeTypeFormat(request.Format);
 
-        return WithProject(request, project => Success(
-            PlcTypeImporter.Import(project, request.TypePath!, request.SourceContent!, format)));
+        return WithEngineeringRoot(request, project => Success(
+            PlcTypeImporter.Import(project, request.TypePath!, request.Content!, format, request.ExpectedContentHash)));
     }
 
     /// <summary>
-    /// The host normalizes <see cref="WorkerRequest.Format"/> before sending, but the worker is
-    /// also driven directly by the live harness — so the type operations re-apply their own
-    /// default (source, i.e. .udt) rather than trusting the field to be set.
+    /// The host normalizes <see cref="WorkerRequest.Format"/> before sending, but internal
+    /// diagnostics and tests can invoke the worker directly. Type operations therefore re-apply
+    /// their own default (source, i.e. .udt) rather than trusting the field to be set.
     /// </summary>
     private static string NormalizeTypeFormat(string? format)
     {
@@ -806,12 +997,19 @@ internal static class Program
 
     private static WorkerResponse ListTagTables(WorkerRequest request)
     {
-        return WithProject(request, project => Success(TagTableReader.ReadAll(project, request.PlcName)));
+        return WithEngineeringRoot(request, project => Success(TagTableReader.ReadInventory(
+            project, request.PlcName, request.TableName, request.FolderPath)));
+    }
+
+    private static WorkerResponse ReadHmi(WorkerRequest request)
+    {
+        return WithEngineeringRoot(request, project => Success(
+            HmiReadDispatch.Read(project, request.Method, request.HmiQuery ?? new HmiQueryInfo())));
     }
 
     private static WorkerResponse CompileCheck(WorkerRequest request)
     {
-        return WithProject(request, project => Success(CompileChecker.Compile(project, request.PlcName, request.BlockPath)));
+        return WithEngineeringRoot(request, project => Success(CompileChecker.Compile(project, request.PlcName, request.BlockPath)));
     }
 
     private static WorkerResponse CreateTagTable(WorkerRequest request)
@@ -926,7 +1124,7 @@ internal static class Program
                 "Operation not confirmed. Set confirm=true to proceed with creating a block.");
         }
 
-        return WithProject(request, project => Success(
+        return WithEngineeringRoot(request, project => Success(
             BlockMutationService.CreateBlock(
                 project,
                 request.BlockPath!,
@@ -949,7 +1147,7 @@ internal static class Program
                 "Operation not confirmed. Set confirm=true to proceed with deleting a block.");
         }
 
-        return WithProject(request, project => Success(
+        return WithEngineeringRoot(request, project => Success(
             BlockMutationService.DeleteBlock(project, request.BlockPath!)));
     }
 
@@ -967,7 +1165,7 @@ internal static class Program
                 "Operation not confirmed. Set confirm=true to proceed with creating a block group.");
         }
 
-        return WithProject(request, project => Success(
+        return WithEngineeringRoot(request, project => Success(
             BlockMutationService.CreateBlockGroup(project, request.BlockPath!)));
     }
 
@@ -985,48 +1183,32 @@ internal static class Program
                 "Operation not confirmed. Set confirm=true to proceed with deleting a block group.");
         }
 
-        return WithProject(request, project => Success(
+        return WithEngineeringRoot(request, project => Success(
             BlockMutationService.DeleteBlockGroup(project, request.BlockPath!)));
-    }
-
-    private static WorkerResponse StartPlc(WorkerRequest request)
-    {
-        if (!request.Confirm)
-        {
-            throw new WorkerOperationException(
-                WorkerFailureCategories.ValidationError,
-                "Operation not confirmed. Set confirm=true to proceed with starting the PLC.");
-        }
-
-        return WithProject(request, project => Success(
-            PlcOnlineService.Start(project, request.PlcName)));
-    }
-
-    private static WorkerResponse StopPlc(WorkerRequest request)
-    {
-        if (!request.Confirm)
-        {
-            throw new WorkerOperationException(
-                WorkerFailureCategories.ValidationError,
-                "Operation not confirmed. Set confirm=true to proceed with stopping the PLC.");
-        }
-
-        return WithProject(request, project => Success(
-            PlcOnlineService.Stop(project, request.PlcName)));
     }
 
     private static WorkerResponse GetProjectStatus(WorkerRequest request)
     {
-        return ProjectLifecycle(request, session =>
+        if (request.ProjectPath is null && request.ExpectedSessionIdentity is { ProjectPath: null } empty)
+            return Execute(() =>
+            {
+                // Recovery must prove zero owners without EnsureConnected adopting a retained path.
+                _sharedSession.ValidateEmptyPortal(empty);
+                return Success(new ProjectStatusResultInfo
+                {
+                    Operation = "get_project_status", Project = new ProjectStatusInfo { IsOpen = false }
+                });
+            });
+        return WithSession(request, session =>
         {
-            var status = ProjectLifecycleService.GetStatusReadOnly(session, request.ProjectPath);
-            return new ProjectLifecycleResultInfo
+            var status = ProjectLifecycleService.GetStatusReadOnly(session, request.ProjectPath, _accessMode);
+            return Success(new ProjectStatusResultInfo
             {
                 Operation = "get_project_status",
                 ProjectPath = status.Path,
                 Project = status
-            };
-        }, requiresConfirm: false);
+            });
+        });
     }
 
     /// <summary>
@@ -1041,7 +1223,7 @@ internal static class Program
     {
         return ProjectLifecycle(request, session =>
         {
-            var status = ProjectLifecycleService.GetBasicStatusReadOnly(session, request.ProjectPath);
+            var status = ProjectLifecycleService.GetBasicStatusReadOnly(session, request.ProjectPath, _accessMode);
             return new ProjectLifecycleResultInfo
             {
                 Operation = "get_project_status",
@@ -1068,6 +1250,20 @@ internal static class Program
                 Project = status
             };
         }, requiresConfirm: false);
+    }
+
+    /// <summary>Internal, non-mutating read of the live source before a proposed rebind.</summary>
+    private static WorkerResponse ProbeOpenProjectRebind(WorkerRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.RebindDestinationProjectPath))
+        {
+            throw new WorkerOperationException(
+                WorkerFailureCategories.ValidationError,
+                "RebindDestinationProjectPath is required for the rebind-state probe.");
+        }
+
+        return WithSession(request, session =>
+            Success(session.ReadProjectRebindState(request.RebindDestinationProjectPath!)));
     }
 
     private static WorkerResponse OpenProject(WorkerRequest request)
@@ -1100,7 +1296,10 @@ internal static class Program
     {
         return ProjectLifecycle(
             request,
-            session => ProjectLifecycleService.SaveProject(session, request.ProjectPath),
+            session => ProjectLifecycleService.SaveProject(
+                session,
+                request.ProjectPath,
+                request.ExpectedSessionIdentity),
             requiresConfirm: true);
     }
 
@@ -1113,7 +1312,8 @@ internal static class Program
                 request.ProjectPath,
                 request.TargetDirectory!,
                 request.TargetName!,
-                request.Rebind),
+                request.Rebind,
+                request.ExpectedSessionIdentity),
             requiresConfirm: true);
     }
 
@@ -1127,7 +1327,8 @@ internal static class Program
                 request.ArchiveDirectory!,
                 request.ArchiveName!,
                 request.ArchiveMode ?? ArchiveModeNames.Compressed,
-                request.SaveBeforeArchive),
+                request.SaveBeforeArchive,
+                request.ExpectedSessionIdentity),
             requiresConfirm: true);
     }
 
@@ -1135,106 +1336,15 @@ internal static class Program
     {
         return ProjectLifecycle(
             request,
-            session => ProjectLifecycleService.CloseProject(session, request.ProjectPath, request.SaveBeforeClose),
+            session => ProjectLifecycleService.CloseProject(
+                session,
+                request.ProjectPath,
+                request.SaveBeforeClose,
+                request.ExpectedSessionIdentity),
             requiresConfirm: true);
     }
 
-    private static WorkerResponse ListOpcUaInterfaces(WorkerRequest request)
-    {
-        return WithProject(request, project => Success(OpcUaInterfaceService.List(project, request.PlcName)));
-    }
-
-    private static WorkerResponse InspectOpcUaVariables(WorkerRequest request)
-    {
-        RequireValue(request.InterfaceName, nameof(request.InterfaceName));
-        RequireValue(request.InterfaceUri, nameof(request.InterfaceUri));
-
-        return WithProject(request, project => Success(OpcUaInterfaceService.Inspect(
-            project,
-            request.PlcName,
-            request.InterfaceName!,
-            request.InterfaceUri!,
-            request.KeepFolderStructure,
-            request.IncludeVariables,
-            request.MaxVariables)));
-    }
-
-    private static WorkerResponse ExportOpcUaInterface(WorkerRequest request)
-    {
-        RequireValue(request.InterfaceName, nameof(request.InterfaceName));
-        RequireValue(request.ExportPath, nameof(request.ExportPath));
-
-        return WithProject(request, project => Success(OpcUaInterfaceService.Export(
-            project,
-            request.PlcName,
-            request.InterfaceName!,
-            request.ExportPath!,
-            request.CatalogPath)));
-    }
-
-    private static WorkerResponse GenerateOpcUaInterface(WorkerRequest request)
-    {
-        RequireConfirmed(request, "generate the OPC UA server interface");
-        RequireValue(request.InterfaceName, nameof(request.InterfaceName));
-        RequireValue(request.InterfaceUri, nameof(request.InterfaceUri));
-
-        return WithProject(request, project => Success(OpcUaInterfaceService.Generate(
-            project,
-            request.PlcName,
-            request.InterfaceName!,
-            request.InterfaceUri!,
-            request.KeepFolderStructure,
-            request.Enabled,
-            request.ReplaceExisting,
-            request.Author,
-            request.ExportPath,
-            request.CatalogPath)));
-    }
-
-    private static WorkerResponse SetOpcUaInterfaceEnabled(WorkerRequest request)
-    {
-        RequireConfirmed(request, "change the OPC UA interface state");
-        RequireValue(request.InterfaceName, nameof(request.InterfaceName));
-
-        return WithProject(request, project => Success(OpcUaInterfaceService.SetEnabled(
-            project,
-            request.PlcName,
-            request.InterfaceName!,
-            request.Enabled)));
-    }
-
-    private static WorkerResponse DeleteOpcUaInterface(WorkerRequest request)
-    {
-        RequireConfirmed(request, "delete the OPC UA interface");
-        RequireValue(request.InterfaceName, nameof(request.InterfaceName));
-
-        return WithProject(request, project => Success(OpcUaInterfaceService.Delete(
-            project,
-            request.PlcName,
-            request.InterfaceName!)));
-    }
-
-    private static void RequireConfirmed(WorkerRequest request, string operation)
-    {
-        if (!request.Confirm)
-        {
-            throw new WorkerOperationException(
-                WorkerFailureCategories.ValidationError,
-                $"Operation not confirmed. Set confirm=true to {operation}.");
-        }
-    }
-
-    private static void RequireValue(string? value, string name)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new WorkerOperationException(
-                WorkerFailureCategories.ValidationError,
-                $"{name} is required.");
-        }
-    }
-
-    private static WorkerResponse TagMutation(WorkerRequest request, Func<Project, TagMutationResultInfo> mutate)
+    private static WorkerResponse TagMutation(WorkerRequest request, Func<ProjectBase, TagMutationResultInfo> mutate)
     {
         if (!request.Confirm)
         {
@@ -1243,7 +1353,7 @@ internal static class Program
                 "Operation not confirmed. Set confirm=true to proceed with the tag operation.");
         }
 
-        return WithProject(request, project => Success(mutate(project)));
+        return WithEngineeringRoot(request, project => Success(mutate(project)));
     }
 
     private static WorkerResponse ProjectLifecycle(
@@ -1261,95 +1371,151 @@ internal static class Program
         return WithSession(request, session => Success(operation(session)));
     }
 
+    /// <summary>
+    /// Runs a content read, write or compile against the common <see cref="ProjectBase"/> root of any
+    /// open container. Which container kinds reach a handler is decided by the capability gate.
+    /// </summary>
+    private static WorkerResponse WithEngineeringRoot(WorkerRequest request, Func<ProjectBase, WorkerResponse> body)
+        => WithActiveContext(request, session => body(session.EngineeringRoot!));
+
     /// <summary>Opens an Openness session, ensures a project is available, then runs <paramref name="body"/>.</summary>
-    private static WorkerResponse WithProject(WorkerRequest request, Func<Project, WorkerResponse> body)
+    private static WorkerResponse WithActiveContext(WorkerRequest request, Func<WorkerTiaPortalSession, WorkerResponse> body)
     {
         return WithSession(request, session =>
         {
-            session.EnsureConnected();
-
             var failure = EnsureRequestedProjectOpen(session, request.ProjectPath);
             if (failure is not null)
             {
                 return failure;
             }
+            ValidateExpectedAfterProjectResolution(session, request);
 
-            if (session.Project is null)
+            if (session.ActiveContext is null)
             {
                 return Failure(
                     WorkerFailureCategories.WorkerOperationFailed,
-                    "No project is open. Provide a projectPath argument or open a project in TIA Portal.");
+                    ProjectOpenPolicy.NoProjectOpenMessage(_accessMode));
             }
 
-            return body(session.Project);
+            return body(session);
         });
     }
 
     /// <summary>
-    /// Applies <see cref="ProjectOpenPolicy"/> before any non-lifecycle operation may open a
-    /// project. Returns null to continue, or the failure response to return to the host.
-    /// In read-only mode, opening a project is never permitted — only the currently open
-    /// project may be used.
+    /// Applies <see cref="ProjectOpenPolicy"/> before a non-lifecycle operation uses the
+    /// already-open project. Returns null to continue, or a failure response to the host.
     /// </summary>
     private static WorkerResponse? EnsureRequestedProjectOpen(WorkerTiaPortalSession session, string? requestedProjectPath)
     {
         var currentPath = session.CurrentProjectPath;
 
-        if (_accessMode == McpAccessMode.ReadOnly)
-        {
-            // Read-only mode: never open a project. Only use what is already open.
-            if (currentPath is null)
-            {
-                var requested = ProjectPathNormalization.Canonicalize(requestedProjectPath);
-                if (requested is not null)
-                {
-                    // A path was supplied but nothing is open — do NOT open it; treat it as an assertion failure.
-                    return Failure(
-                        WorkerFailureCategories.AccessDenied,
-                        "Read-only mode operates only on the project already open in TIA Portal. "
-                        + "Open the intended project manually and retry.");
-                }
-
-                return Failure(
-                    WorkerFailureCategories.WorkerOperationFailed,
-                    "No project is open in TIA Portal. Open the intended project manually and retry.");
-            }
-
-            if (requestedProjectPath is not null)
-            {
-                var requested = ProjectPathNormalization.Canonicalize(requestedProjectPath);
-                if (requested is not null && !string.Equals(currentPath, requested, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Failure(
-                        WorkerFailureCategories.BindingConflict,
-                        $"Read-only mode is bound to '{currentPath}' but the request targets '{requested}'. "
-                        + "Read-only mode does not switch projects. Omit projectPath to use the open project.");
-                }
-            }
-
-            return null;
-        }
-
-        // Read-write mode: existing behavior.
         switch (ProjectOpenPolicy.Decide(currentPath, requestedProjectPath))
         {
-            case ProjectOpenDecision.OpenRequested:
-                session.OpenProject(requestedProjectPath!);
-                return null;
+            case ProjectOpenDecision.RequestedNotOpen:
+                return Failure(
+                    WorkerFailureCategories.AccessDenied,
+                    ProjectOpenPolicy.NotOpenMessage(requestedProjectPath!, _accessMode));
             case ProjectOpenDecision.Refuse:
                 return Failure(
                     WorkerFailureCategories.BindingConflict,
-                    ProjectOpenPolicy.RefusalMessage(currentPath!, requestedProjectPath!));
+                    ProjectOpenPolicy.RefusalMessage(currentPath!, requestedProjectPath!, _accessMode));
             default:
-                return null;
+                if (currentPath is not null)
+                    return null;
+                return Failure(
+                    WorkerFailureCategories.WorkerOperationFailed,
+                    ProjectOpenPolicy.NoProjectOpenMessage(_accessMode));
         }
     }
+
+    /// <summary>
+    /// Re-check the caller's identity after resolving the already-open project so no operation
+    /// body can run on a generation that changed after the original precondition check.
+    /// </summary>
+    private static void ValidateExpectedAfterProjectResolution(
+        WorkerTiaPortalSession session,
+        WorkerRequest request)
+        => ValidateExpectedSessionIdentityForRequest(
+            session,
+            request,
+            AllowsMissingExpectedSessionIdentity(request.Method));
+
+    private static void ValidateHardwarePageContinuationIdentity(WorkerRequest request)
+    {
+        if (request.HardwarePageContinuation is null)
+        {
+            return;
+        }
+
+        ValidateExpectedSessionIdentityForRequest(
+            _sharedSession,
+            request,
+            allowMissingExpectedIdentity: false);
+    }
+
+    private static void ValidateExpectedSessionIdentityForRequest(
+        WorkerTiaPortalSession session,
+        WorkerRequest request,
+        bool allowMissingExpectedIdentity,
+        bool useCachedIdentity = false)
+    {
+        try
+        {
+            session.ValidateExpectedSessionIdentity(
+                request.ExpectedSessionIdentity,
+                allowMissingExpectedIdentity,
+                useCachedIdentity);
+        }
+        catch (WorkerOperationException exception) when (
+            request.HardwarePageContinuation is not null
+            && string.Equals(request.Method, "read_hardware_page_candidates", StringComparison.Ordinal)
+            && string.Equals(
+                exception.FailureCategory,
+                WorkerFailureCategories.BindingConflict,
+                StringComparison.Ordinal))
+        {
+            throw new WorkerOperationException(
+                WorkerFailureCategories.CursorBindingMismatch,
+                "The hardware-page continuation no longer matches the live worker session.");
+        }
+    }
+
+    private static WorkerResponse WithPortalRead(WorkerRequest request, Func<WorkerTiaPortalSession, WorkerResponse> body)
+        => Execute(() => MultiuserPortalReadDispatch.Run(_sharedSession, request, body));
 
     /// <summary>Runs <paramref name="body"/> with the shared long-lived session.</summary>
     private static WorkerResponse WithSession(WorkerRequest request, Func<WorkerTiaPortalSession, WorkerResponse> body)
     {
-        return Execute(() => body(_sharedSession));
+        return Execute(() =>
+        {
+            var allowMissingExpectedIdentity = AllowsMissingExpectedSessionIdentity(request.Method);
+
+            // First compare against the cached identity. A request carrying an identity from a
+            // restarted worker is rejected before Attach() or any other Siemens call. Then refresh
+            // the live Portal/project handles and compare again so a UI-side close, reopen, or
+            // SaveAs cannot race into the requested engineering operation.
+            ValidateExpectedSessionIdentityForRequest(
+                _sharedSession,
+                request,
+                allowMissingExpectedIdentity);
+            _sharedSession.EnsureConnected(request.ProjectPath);
+            ValidateExpectedSessionIdentityForRequest(
+                _sharedSession,
+                request,
+                allowMissingExpectedIdentity);
+
+            var capabilityOperation = ProjectCapabilityCatalog.OperationFor(request.Method);
+            if (capabilityOperation is not null && _sharedSession.ActiveContext is { } activeContext
+                && !ProjectCapabilityCatalog.Supports(activeContext.ContainerKind, capabilityOperation))
+                return Failure(WorkerFailureCategories.UnsupportedCapability,
+                    $"{capabilityOperation} is unavailable for this project container.");
+
+            return body(_sharedSession);
+        });
     }
+
+    private static bool AllowsMissingExpectedSessionIdentity(string method)
+        => !OperationPolicyCatalog.RequiresExpectedSessionIdentity(method);
 
     /// <summary>Single place that maps Openness exceptions to a <see cref="WorkerResponse"/> failure and stamps completed operations with their resolved project path.</summary>
     private static WorkerResponse Execute(Func<WorkerResponse> body)
@@ -1391,7 +1557,9 @@ internal static class Program
 
         try
         {
+            response.PortalProcessId = _sharedSession.CurrentProcessId;
             response.ResolvedProjectPath = _sharedSession.CurrentProjectPath;
+            response.SessionIdentity = _sharedSession.GetSessionIdentity();
         }
         catch (Exception ex)
         {
@@ -1408,34 +1576,40 @@ internal static class Program
 
     private static WorkerResponse Success<T>(T payload)
     {
-        var payloadOptions = payload is NetworkObjectListInfo
-            ? NetworkObjectListJsonOptions
-            : JsonOptions;
         return new WorkerResponse
         {
             Success = true,
-            Payload = JsonSerializer.Serialize(payload, payloadOptions)
+            Payload = WorkerJson.SerializePayload(payload)
         };
     }
 
-    private static WorkerResponse RawPayload(string payload, IReadOnlyList<string>? warnings = null)
+    private static WorkerResponse RawPayload(
+        string payload,
+        IReadOnlyList<string>? warnings = null,
+        BlockImportOutcomeInfo? blockImportOutcome = null)
     {
         return new WorkerResponse
         {
             Success = true,
             Payload = payload,
-            Warnings = warnings is { Count: > 0 } ? new List<string>(warnings) : null
+            Warnings = warnings is { Count: > 0 } ? new List<string>(warnings) : null,
+            BlockImportOutcome = blockImportOutcome
         };
     }
 
-    private static WorkerResponse Failure(string failureCategory, string error, IReadOnlyList<string>? warnings = null)
+    private static WorkerResponse Failure(
+        string failureCategory,
+        string error,
+        IReadOnlyList<string>? warnings = null,
+        BlockImportOutcomeInfo? blockImportOutcome = null)
     {
         return new WorkerResponse
         {
             Success = false,
             Error = error,
             FailureCategory = failureCategory,
-            Warnings = warnings is { Count: > 0 } ? new List<string>(warnings) : null
+            Warnings = warnings is { Count: > 0 } ? new List<string>(warnings) : null,
+            BlockImportOutcome = blockImportOutcome
         };
     }
 }

@@ -1,18 +1,13 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Json;
+using TiaMcpServer.Contracts.Network;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Network;
 
 public class AddDeviceResultInfoTests
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    private static readonly JsonSerializerOptions JsonOptions = WorkerJson.PayloadOptionsFor(typeof(AddDeviceResultInfo));
 
     [Fact]
     public void SerializesEmptyResult()

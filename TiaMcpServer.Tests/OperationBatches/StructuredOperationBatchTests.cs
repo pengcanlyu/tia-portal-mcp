@@ -1,5 +1,5 @@
 using System.Text.Json;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Json;
 using TiaMcpServer.OperationBatches;
 using TiaMcpServer.Worker;
@@ -44,6 +44,28 @@ public class StructuredOperationBatchTests
             Omission: null,
             SkipReason: null,
             warnings);
+
+    [Fact]
+    public void StructuredOperationOmission_OmitsSubjectWhenItWasNotProvided()
+    {
+        var omission = new StructuredOperationOmission("budget", 10, 20, "network_read", "retry");
+
+        var json = CanonicalJson.Serialize(omission);
+
+        Assert.Equal("""{"guidance":"retry","limitChars":10,"originalChars":20,"reason":"budget","retryTool":"network_read"}""", json);
+    }
+
+    [Fact]
+    public void StructuredOperationOmission_SerializesSubjectWhenProvided()
+    {
+        var omission = new StructuredOperationOmission(
+            "budget", 10, 20, "network_read", "retry",
+            new StructuredOperationOmissionSubject("device", "PLC_1", "device-1"));
+
+        var json = CanonicalJson.Serialize(omission);
+
+        Assert.Contains("\"subject\":{\"identifier\":\"device-1\",\"kind\":\"device\",\"name\":\"PLC_1\"}", json);
+    }
 
     /// <summary>
     /// Projects the way a real domain contract does: a worker failure fails the item, a successful

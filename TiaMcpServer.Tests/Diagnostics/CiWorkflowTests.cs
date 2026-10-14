@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Xunit;
@@ -27,7 +28,7 @@ public class CiWorkflowTests
             .SelectMany(ReadRunCommandBlocks)
             .SelectMany(ExpandRepositoryBuildScripts)
             .Where(command => command.Contains("dotnet build", StringComparison.OrdinalIgnoreCase))
-            .Where(command => command.Contains("TiaMcpServer.sln", StringComparison.OrdinalIgnoreCase))
+            .Where(command => command.Contains("TiaMcpServer.slnx", StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
         Assert.NotEmpty(solutionBuildCommands);
@@ -36,12 +37,46 @@ public class CiWorkflowTests
             $"Expected solution build command to contain the exact '-m:1' flag as a standalone token, but it did not: {command}"));
     }
 
+    [Fact]
+    public void ReferenceStubVerificationRunsAfterRestoreAndBeforeBuild()
+    {
+        var ciWorkflowPath = Path.Combine(GetRepositoryRoot(), ".github", "workflows", "ci.yml");
+        var commands = ReadRunCommandBlocks(ciWorkflowPath)
+            .SelectMany(block => block.Split('\n'))
+            .Select(command => command.Trim())
+            .ToArray();
+
+        var mainRestore = Assert.Single(commands, command =>
+            command.StartsWith("dotnet restore TiaMcpServer.slnx", StringComparison.Ordinal));
+        var referenceRestore = Assert.Single(commands, command =>
+            command.StartsWith("dotnet restore reference-stubs/TiaMcpServer.ReferenceStubs.sln", StringComparison.Ordinal));
+        var verifier = Assert.Single(commands, command =>
+            command.Contains("scripts/verify-reference-stubs.ps1", StringComparison.Ordinal));
+        var releaseBuild = Assert.Single(commands, command =>
+            command.StartsWith("dotnet build TiaMcpServer.slnx", StringComparison.Ordinal) &&
+            command.Contains("--configuration Release", StringComparison.Ordinal));
+
+        Assert.Matches(SingleNodeBuildFlagPattern, mainRestore);
+        Assert.Matches(SingleNodeBuildFlagPattern, referenceRestore);
+        Assert.Contains("pwsh -NoProfile -File scripts/verify-reference-stubs.ps1", verifier, StringComparison.Ordinal);
+        Assert.Matches(@"(?<=^|\s)-Configuration\s+Release(?=\s|$)", verifier);
+        Assert.Matches(@"(?<=^|\s)-NoRestore(?=\s|$)", verifier);
+        Assert.DoesNotMatch(@"(?i)(?<=^|\s)-Update(?=\s|:|$)", verifier);
+
+        Assert.True(Array.IndexOf(commands, mainRestore) < Array.IndexOf(commands, referenceRestore),
+            "Expected the main restore to precede the dedicated reference-stub restore.");
+        Assert.True(Array.IndexOf(commands, referenceRestore) < Array.IndexOf(commands, verifier),
+            "Expected the dedicated reference-stub restore to precede verification.");
+        Assert.True(Array.IndexOf(commands, verifier) < Array.IndexOf(commands, releaseBuild),
+            "Expected reference-stub verification to precede the Release solution build.");
+    }
+
     [Theory]
-    [InlineData("dotnet build TiaMcpServer.sln -m:1", true)]
-    [InlineData("dotnet build TiaMcpServer.sln -m:1 /p:UseTiaPortalReferenceStubs=true", true)]
-    [InlineData("dotnet build TiaMcpServer.sln -m:10", false)]
-    [InlineData("dotnet build TiaMcpServer.sln -m:12", false)]
-    [InlineData("dotnet build TiaMcpServer.sln -m:100", false)]
+    [InlineData("dotnet build TiaMcpServer.slnx -m:1", true)]
+    [InlineData("dotnet build TiaMcpServer.slnx -m:1 /p:UseTiaPortalReferenceStubs=true", true)]
+    [InlineData("dotnet build TiaMcpServer.slnx -m:10", false)]
+    [InlineData("dotnet build TiaMcpServer.slnx -m:12", false)]
+    [InlineData("dotnet build TiaMcpServer.slnx -m:100", false)]
     public void SingleNodeBuildFlagPattern_MatchesOnlyExactToken(string command, bool expectedMatch)
     {
         Assert.Equal(expectedMatch, SingleNodeBuildFlagPattern.IsMatch(command));
@@ -50,7 +85,7 @@ public class CiWorkflowTests
     [Fact]
     public void SingleNodeBuildFlagPattern_RejectsFalsePositive_ThatOldSubstringCheckWouldHaveAccepted()
     {
-        const string lookalikeCommand = "dotnet build TiaMcpServer.sln -m:10";
+        const string lookalikeCommand = "dotnet build TiaMcpServer.slnx -m:10";
 
         // This demonstrates the exact gap the old assertion had: "-m:10" contains the
         // literal substring "-m:1", so `Assert.Contains("-m:1", command, ...)` passed here.
@@ -92,12 +127,55 @@ public class CiWorkflowTests
     }
 
     [Fact]
+    public void Toolchain_UsesServicedDotNet10WithoutCrossMajorRollForward()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        using var globalJson = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(repositoryRoot, "global.json")));
+        var sdk = globalJson.RootElement.GetProperty("sdk");
+
+        Assert.Equal("10.0.400", sdk.GetProperty("version").GetString());
+        Assert.Equal("latestFeature", sdk.GetProperty("rollForward").GetString());
+        Assert.False(sdk.GetProperty("allowPrerelease").GetBoolean());
+
+        foreach (var workflow in new[] { "ci.yml", "publish.yml" })
+        {
+            var text = File.ReadAllText(Path.Combine(
+                repositoryRoot, ".github", "workflows", workflow));
+            Assert.Contains("10.0.x", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("8.0.x", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void TestProject_DeclaresExplicitTestProjectMarkerForSdk10()
+    {
+        var projectPath = Path.Combine(
+            GetRepositoryRoot(),
+            "TiaMcpServer.Tests",
+            "TiaMcpServer.Tests.csproj");
+        var project = XDocument.Load(projectPath);
+        var marker = project.Root?
+            .Elements("PropertyGroup")
+            .Elements("IsTestProject")
+            .SingleOrDefault();
+
+        Assert.NotNull(marker);
+        Assert.Equal("true", marker!.Value, ignoreCase: true);
+    }
+
+    [Fact]
     public void CiCoverage_CollectsThenEnforcesBeforeUpload()
     {
         var ciWorkflowPath = Path.Combine(GetRepositoryRoot(), ".github", "workflows", "ci.yml");
         Assert.True(File.Exists(ciWorkflowPath), $"Expected CI workflow to exist at {ciWorkflowPath}");
 
         var workflowText = File.ReadAllText(ciWorkflowPath);
+        var coverageCommand = Assert.Single(ReadRunCommandBlocks(ciWorkflowPath), command =>
+            command.Contains("dotnet test", StringComparison.Ordinal) &&
+            command.Contains("--collect:\"XPlat Code Coverage\"", StringComparison.Ordinal));
+        Assert.Contains("-- xUnit.ParallelizeTestCollections=false xUnit.ParallelizeAssembly=false xUnit.MaxParallelThreads=1 RunConfiguration.MaxCpuCount=1",
+            coverageCommand, StringComparison.Ordinal);
 
         var runsettingsIndex = workflowText.IndexOf(
             "--settings TiaMcpServer.Tests/coverage.runsettings",
@@ -152,9 +230,9 @@ public class CiWorkflowTests
             .Split('\n')
             .FirstOrDefault(line =>
                 line.Contains("dotnet build", StringComparison.OrdinalIgnoreCase) &&
-                line.Contains("TiaMcpServer.sln", StringComparison.OrdinalIgnoreCase));
+                line.Contains("TiaMcpServer.slnx", StringComparison.OrdinalIgnoreCase));
 
-        Assert.True(solutionBuildLine is not null, "Expected README.md 'Build From Source' section to contain a 'dotnet build TiaMcpServer.sln' command.");
+        Assert.True(solutionBuildLine is not null, "Expected README.md 'Build From Source' section to contain a 'dotnet build TiaMcpServer.slnx' command.");
         Assert.True(
             SingleNodeBuildFlagPattern.IsMatch(solutionBuildLine!),
             $"Expected the README 'Build From Source' solution build command to contain the exact '-m:1' flag as a standalone token, but it did not: {solutionBuildLine}");
@@ -162,12 +240,13 @@ public class CiWorkflowTests
 
     /// <summary>
     /// Pins that <c>get_project_status</c> is documented as read-only/non-binding and that
-    /// deliberate project switching is documented exclusively through <c>open_project</c> - never
+    /// adopting/switching an already-open project uses <c>bind_project</c>, while opening uses
+    /// <c>open_project</c> - never
     /// as something achievable by calling <c>get_project_status</c> with a different path. Guards
     /// against the installation guide regressing to instructing side-effecting status-based switching.
     /// </summary>
     [Fact]
-    public void InstallationDoc_DescribesGetProjectStatusAsReadOnlyNonBindingAndSwitchingThroughOpenProject()
+    public void InstallationDoc_DescribesNonBindingStatusAndExplicitBindVersusOpen()
     {
         var readmePath = Path.Combine(GetRepositoryRoot(), "docs", "guides", "installation.md");
         Assert.True(File.Exists(readmePath), $"Expected installation.md to exist at {readmePath}");
@@ -182,7 +261,9 @@ public class CiWorkflowTests
             normalizedReadmeText,
             StringComparison.Ordinal);
         Assert.Contains("do not use it to switch projects", normalizedReadmeText, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Use `open_project` for deliberate session switching", normalizedReadmeText, StringComparison.Ordinal);
+        Assert.Contains("Use `bind_project` for adopting or switching to an already-open project", normalizedReadmeText, StringComparison.Ordinal);
+        Assert.Contains("use `open_project` only for opening one", normalizedReadmeText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Use `open_project` for deliberate session switching", normalizedReadmeText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -196,6 +277,19 @@ public class CiWorkflowTests
         Assert.DoesNotContain("pending live V21 re-verification", normalizedReadmeText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("multi-document `update_block_logic` round trips are verified", normalizedReadmeText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("SCL `create_block` calls are verified", normalizedReadmeText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ImportExportSummary_DocumentsStructuredPreviewDiffBounds()
+    {
+        var text = File.ReadAllText(Path.Combine(GetRepositoryRoot(), "docs", "SupportedOperations", "IMPORT_EXPORT_OPTIONS_SUMMARY.md"));
+
+        Assert.Contains("update_block_logic", text, StringComparison.Ordinal);
+        Assert.Contains("update_type_content", text, StringComparison.Ordinal);
+        Assert.Contains("40 excerpt lines", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("8,192", text, StringComparison.Ordinal);
+        Assert.Contains("32,768", text, StringComparison.Ordinal);
+        Assert.Contains("line-ending-only", text, StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<string> EnumerateWorkflowFiles()

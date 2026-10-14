@@ -1,5 +1,6 @@
 using System.Text.Json;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Block;
+using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Worker;
 using Xunit;
 
@@ -125,5 +126,28 @@ public class WorkerCallResultTests
 
         Assert.DoesNotContain(protectedTestOnlyValue, result.ToText());
         Assert.DoesNotContain(protectedTestOnlyValue, result.ToEnvelopeText());
+    }
+
+    [Fact]
+    public void BlockImportOutcome_CarriedBySuccessAndFailureWithoutChangingText()
+    {
+        var outcome = new BlockImportOutcomeInfo
+        {
+            ImportStage = "completed", ImportResultState = "success",
+            TargetMutationCommitted = true, CompileStage = "unavailable",
+            FinalReadStage = "unavailable", TemporarySourceState = "not_applicable",
+            ContentRelation = "unknown"
+        };
+        var ok = WorkerCallResult.Ok("old payload") with { BlockImportOutcome = outcome };
+        var failed = WorkerCallResult.Fail(
+            WorkerFailureCategories.PostconditionFailed, "bounded failure",
+            new[] { "bounded warning" }) with { BlockImportOutcome = outcome };
+
+        Assert.Same(outcome, ok.BlockImportOutcome);
+        Assert.Same(outcome, failed.BlockImportOutcome);
+        Assert.Equal("old payload", ok.ToText());
+        Assert.Equal("Error: bounded failure", failed.ToText());
+        Assert.Equal(WorkerFailureCategories.PostconditionFailed, failed.FailureCategory);
+        Assert.Equal("bounded warning", Assert.Single(failed.Warnings));
     }
 }

@@ -1,127 +1,81 @@
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
+using TiaMcpServer.Tests.TestSupport;
+using TiaMcpServer.Tests.TestUtilities;
 using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Safety;
 
-/// <summary>
-/// The tool layer must never reach a process-wide audit directory. Before dependency injection
-/// was introduced, ProjectLifecycleTools resolved a single process-wide WriteSafetyService
-/// instance, so 39 of 42 records in a real machine's audit trail came from `dotnet test`.
-/// </summary>
+/// <summary>Tool calls use the injected audit sink, including dry runs and rejections.</summary>
 public class AuditIsolationTests
 {
-    /// <summary>
-    /// Records are appended as lines to an existing per-day *.jsonl file, so a stray write can
-    /// leave the file count in a directory unchanged. Summing line counts across all files is
-    /// the only way this assertion can actually detect an unwanted write.
-    /// </summary>
+    private static string DefaultDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TiaMcpServer", "audit");
+
     private static int CountAuditLines(string directory)
         => Directory.Exists(directory)
-            ? Directory.GetFiles(directory).Sum(file => File.ReadAllLines(file).Length)
+            ? Directory.GetFiles(directory, "*.jsonl").Sum(file => File.ReadAllLines(file).Length)
             : 0;
 
     [Fact]
-    public async Task LifecycleTool_WritesAuditOnlyToTheInjectedDirectory()
+    public async Task ProjectWriteTool_DryRunAndApplyWriteOnlyToTheInjectedDirectory()
     {
-        var defaultDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "TiaMcpServer",
-            "audit");
-        var before = CountAuditLines(defaultDirectory);
-
+        var before = CountAuditLines(DefaultDirectory);
         using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
+        var binding = new ProjectSessionBinding(null);
+        using var client = new OpennessWorkerClient(binding, workerExecutablePath: FakeWorkerLocator.Locate(),
+            accessPolicy: new OperationAccessPolicy(McpAccessMode.Full));
+        var execution = LifecycleTestCalls.Execution(client, audit);
+        using var fixture = new LifecycleProtocolFixture();
+        var path = fixture.DestinationPath;
 
-        using var client = new OpennessWorkerClient(
-            new ProjectSessionBinding(null),
-            logger: null,
-            workerExecutablePath: FakeWorkerLocator.Locate());
+        var preview = await ProjectWriteTools.OpenProject(client, execution, path, dryRun: true);
+        Assert.Equal("preview", LifecycleTestCalls.Document(preview).GetProperty("phase").GetString());
+        Assert.Equal(1, LifecycleTestCalls.AuditCount(audit));
+        var applied = await ProjectWriteTools.OpenProject(client, execution, path);
+        Assert.True(LifecycleTestCalls.Document(applied).GetProperty("success").GetBoolean());
 
-        var preview = await ProjectLifecycleTools.OpenProject(client, safety, projectPath: "ok");
-        using var previewDoc = System.Text.Json.JsonDocument.Parse(preview);
-        var token = previewDoc.RootElement.GetProperty("safetyToken").GetString();
-
-        await ProjectLifecycleTools.OpenProject(
-            client,
-            safety,
-            projectPath: "ok",
-            confirm: true,
-            safetyToken: token);
-
-        Assert.True(Directory.Exists(audit.Path));
-        Assert.NotEmpty(Directory.GetFiles(audit.Path));
-
-        var after = CountAuditLines(defaultDirectory);
-        Assert.Equal(before, after);
+        Assert.Equal(2, LifecycleTestCalls.AuditCount(audit));
+        Assert.Equal(before, CountAuditLines(DefaultDirectory));
     }
 
     [Fact]
-    public async Task SafetyRejectedApply_WritesNoAuditAndIsNotSuccess()
+    public async Task BindingRejectedSave_RecordsOneRejectedCallOnlyInTheInjectedDirectory()
     {
-        var defaultDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "TiaMcpServer",
-            "audit");
-        var before = CountAuditLines(defaultDirectory);
-
+        var before = CountAuditLines(DefaultDirectory);
         using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
+        using var client = new OpennessWorkerClient(new ProjectSessionBinding(null),
+            workerExecutablePath: "worker-must-not-start.exe",
+            accessPolicy: new OperationAccessPolicy(McpAccessMode.Full));
 
-        using var client = new OpennessWorkerClient(
-            new ProjectSessionBinding(null),
-            logger: null,
-            workerExecutablePath: FakeWorkerLocator.Locate());
+        var result = await ProjectWriteTools.SaveProject(client,
+            LifecycleTestCalls.Execution(client, audit));
 
-        // Real token from a preview, then apply against a DIFFERENT project path: rejected as
-        // binding_conflict before any worker call or audit append. A safety-rejected apply must
-        // never be audit-recorded nor rendered as success.
-        var preview = await ProjectLifecycleTools.OpenProject(client, safety, projectPath: "C:\\open\\Line.ap21");
-        using var previewDoc = System.Text.Json.JsonDocument.Parse(preview);
-        var token = previewDoc.RootElement.GetProperty("safetyToken").GetString();
-
-        var applied = await ProjectLifecycleTools.OpenProject(
-            client, safety, projectPath: "C:\\other\\Line.ap21", confirm: true, safetyToken: token);
-        using var appliedDoc = System.Text.Json.JsonDocument.Parse(applied);
-
-        Assert.False(appliedDoc.RootElement.GetProperty("success").GetBoolean());
-        Assert.Equal(
-            WorkerFailureCategories.BindingConflict,
-            appliedDoc.RootElement.GetProperty("failureCategory").GetString());
-
-        // No audit line in the injected directory, and nothing leaked to the process-wide default.
-        Assert.Equal(0, CountAuditLines(audit.Path));
-        Assert.Equal(before, CountAuditLines(defaultDirectory));
+        LifecycleTestCalls.Rejected(result, WorkerFailureCategories.BindingConflict);
+        Assert.Equal(1, LifecycleTestCalls.AuditCount(audit));
+        Assert.Equal(before, CountAuditLines(DefaultDirectory));
     }
 
     [Fact]
-    public async Task RejectedSaveProjectAs_RebindFalse_WritesNoAuditAnywhere()
+    public async Task RejectedSaveProjectAs_RebindFalse_RecordsOneRejectedCallOnlyInTheInjectedDirectory()
     {
-        var defaultDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "TiaMcpServer",
-            "audit");
-        var before = CountAuditLines(defaultDirectory);
-
+        var before = CountAuditLines(DefaultDirectory);
         using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
+        using var client = new OpennessWorkerClient(new ProjectSessionBinding(null),
+            workerExecutablePath: "worker-must-not-start.exe",
+            accessPolicy: new OperationAccessPolicy(McpAccessMode.Full));
 
-        // rebind=false is rejected as validation_error before any audit append. workerClient: null!
-        // additionally proves the worker was never invoked (any call would NullReferenceException).
-        var response = await ProjectLifecycleTools.SaveProjectAs(
-            workerClient: null!,
-            safety,
-            targetDirectory: "C:\\Target",
-            targetName: "Copy",
-            rebind: false);
+        var result = await ProjectWriteTools.SaveProjectAs(client,
+            LifecycleTestCalls.Execution(client, audit),
+            targetDirectory: @"C:\Target", targetName: "Copy", rebind: false);
 
-        using var doc = System.Text.Json.JsonDocument.Parse(response);
-        Assert.False(doc.RootElement.GetProperty("success").GetBoolean());
-
-        // No audit lines in the injected directory, and nothing leaked to the process-wide default.
-        Assert.Equal(0, CountAuditLines(audit.Path));
-        Assert.Equal(before, CountAuditLines(defaultDirectory));
+        LifecycleTestCalls.Rejected(result, WorkerFailureCategories.ValidationError);
+        Assert.Equal(1, LifecycleTestCalls.AuditCount(audit));
+        Assert.Equal(before, CountAuditLines(DefaultDirectory));
     }
 }

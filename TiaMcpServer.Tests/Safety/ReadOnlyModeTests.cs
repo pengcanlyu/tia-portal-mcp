@@ -1,14 +1,19 @@
 using System.Reflection;
 using ModelContextProtocol.Server;
-using TiaMcpServer.Batch;
 using TiaMcpServer.Cli;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Diagnostics;
 using TiaMcpServer.Network;
+using TiaMcpServer.OpennessWorker.Worker;
 using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
+using TiaMcpServer.Tests.TestSupport;
+using TiaMcpServer.Tests.TestUtilities;
+using TiaMcpServer.Tests.Worker;
 using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
-using TiaMcpServer.OpennessWorker;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Safety;
@@ -17,6 +22,7 @@ namespace TiaMcpServer.Tests.Safety;
 /// Comprehensive tests for the read-only safety mode: configuration, policy catalog,
 /// host-side enforcement, worker-side authorization, tool discovery, and batch behavior.
 /// </summary>
+[Collection(RealWorkerProcessCollection.Name)]
 public class ReadOnlyModeTests
 {
     #region Configuration Tests
@@ -151,26 +157,52 @@ public class ReadOnlyModeTests
     }
 
     [Fact]
-    public void ReadWriteMode_AllowsAllClassifiedOperations()
+    public void FullMode_AllowsAllClassifiedOperations()
     {
         foreach (var op in OperationPolicyCatalog.AllOperationNames)
         {
-            Assert.True(OperationPolicyCatalog.IsAllowed(McpAccessMode.ReadWrite, op));
+            Assert.True(OperationPolicyCatalog.IsAllowed(McpAccessMode.Full, op));
         }
     }
 
     [Theory]
+    [InlineData("read_hardware_config", false)]
+    [InlineData("list_tia_portal_processes", false)]
+    [InlineData("select_portal_project", false)]
+    [InlineData("get_block_content", false)]
+    [InlineData("get_type_content", false)]
+    [InlineData("open_project", false)]
+    [InlineData("create_project", false)]
+    [InlineData("compile_check", true)]
+    [InlineData("probe_project_status_for_lifecycle", true)]
+    [InlineData("probe_open_project_rebind", true)]
+    [InlineData("update_block_logic", true)]
+    [InlineData("unknown-operation", true)]
+    [InlineData("get_type_content_unrecognized", true)]
+    [InlineData("update_type_content", true)]
+    [InlineData("", true)]
+    public void ExpectedSessionIdentityPolicy_IsFailClosed(
+        string operation,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            OperationPolicyCatalog.RequiresExpectedSessionIdentity(operation));
+    }
+
+    [Theory]
     [InlineData("get_project_status")]
-    [InlineData("browse_project_tree")]
+    [InlineData("list_tia_portal_processes")]
+    [InlineData("select_portal_project")]
+    [InlineData("browse_project_tree_v3_snapshot")]
     [InlineData("read_hardware_config")]
     [InlineData("search_equipment_catalog")]
     [InlineData("read_cross_references")]
     [InlineData("list_tag_tables")]
     [InlineData("get_block_content")]
+    [InlineData("get_type_content")]
     [InlineData("list_network_objects")]
     [InlineData("inspect_network_object")]
-    [InlineData("list_opcua_interfaces")]
-    [InlineData("inspect_opcua_variables")]
     public void ReadOnlyMode_AllowsApprovedOperations(string operation)
     {
         Assert.True(OperationPolicyCatalog.IsAllowed(McpAccessMode.ReadOnly, operation));
@@ -178,6 +210,7 @@ public class ReadOnlyModeTests
 
     [Theory]
     [InlineData("compile_check")]
+    [InlineData("probe_open_project_rebind")]
     [InlineData("open_project")]
     [InlineData("create_project")]
     [InlineData("save_project")]
@@ -185,6 +218,8 @@ public class ReadOnlyModeTests
     [InlineData("archive_project")]
     [InlineData("close_project")]
     [InlineData("update_block_logic")]
+    [InlineData("update_type_content")]
+    [InlineData("get_type_content_unrecognized")]
     [InlineData("create_block")]
     [InlineData("delete_block")]
     [InlineData("create_block_group")]
@@ -202,12 +237,6 @@ public class ReadOnlyModeTests
     [InlineData("create_subnet")]
     [InlineData("update_subnet")]
     [InlineData("delete_subnet")]
-    [InlineData("export_opcua_interface")]
-    [InlineData("generate_opcua_interface")]
-    [InlineData("set_opcua_interface_enabled")]
-    [InlineData("delete_opcua_interface")]
-    [InlineData("start_plc")]
-    [InlineData("stop_plc")]
     public void ReadOnlyMode_DeniesProhibitedOperations(string operation)
     {
         Assert.False(OperationPolicyCatalog.IsAllowed(McpAccessMode.ReadOnly, operation));
@@ -218,6 +247,16 @@ public class ReadOnlyModeTests
     {
         Assert.Equal(OperationCapability.Compile, OperationPolicyCatalog.GetCapability("compile_check"));
         Assert.False(OperationPolicyCatalog.IsAllowed(McpAccessMode.ReadOnly, "compile_check"));
+    }
+
+    [Fact]
+    public void RebindProbe_IsProjectLifecycleAndRequiresExpectedIdentity()
+    {
+        Assert.Equal(
+            OperationCapability.ProjectLifecycle,
+            OperationPolicyCatalog.GetCapability("probe_open_project_rebind"));
+        Assert.True(OperationPolicyCatalog.RequiresExpectedSessionIdentity("probe_open_project_rebind"));
+        Assert.False(OperationPolicyCatalog.IsAllowed(McpAccessMode.ReadOnly, "probe_open_project_rebind"));
     }
 
     #endregion
@@ -251,18 +290,24 @@ public class ReadOnlyModeTests
     {
         var policy = new OperationAccessPolicy(McpAccessMode.ReadOnly);
         Assert.Null(policy.Authorize("get_project_status"));
-        Assert.Null(policy.Authorize("browse_project_tree"));
+        Assert.Null(policy.Authorize("browse_project_tree_v3_snapshot"));
         Assert.Null(policy.Authorize("get_block_content"));
+        Assert.Null(policy.Authorize("get_type_content"));
     }
 
     [Fact]
-    public void OperationAccessPolicy_ReadWrite_AllowsAllOperations()
+    public void OperationAccessPolicy_ReadWrite_AllowsEditsCompileAndLifecycle()
     {
         var policy = new OperationAccessPolicy(McpAccessMode.ReadWrite);
         Assert.Null(policy.Authorize("update_block_logic"));
         Assert.Null(policy.Authorize("compile_check"));
         Assert.Null(policy.Authorize("get_project_status"));
-        Assert.Null(policy.Authorize("start_plc"));
+        Assert.Null(policy.Authorize("open_project"));
+        Assert.Null(policy.Authorize("create_project"));
+        Assert.Null(policy.Authorize("save_project"));
+        Assert.Null(policy.Authorize("save_project_as"));
+        Assert.Null(policy.Authorize("archive_project"));
+        Assert.Null(policy.Authorize("close_project"));
     }
 
     [Fact]
@@ -275,14 +320,6 @@ public class ReadOnlyModeTests
         Assert.NotNull(policy.Authorize("save_project_as"));
         Assert.NotNull(policy.Authorize("archive_project"));
         Assert.NotNull(policy.Authorize("close_project"));
-    }
-
-    [Fact]
-    public void OperationAccessPolicy_DeniesOnlineControlOperations()
-    {
-        var policy = new OperationAccessPolicy(McpAccessMode.ReadOnly);
-        Assert.NotNull(policy.Authorize("start_plc"));
-        Assert.NotNull(policy.Authorize("stop_plc"));
     }
 
     [Fact]
@@ -334,19 +371,24 @@ public class ReadOnlyModeTests
     }
 
     [Fact]
-    public async Task OpennessWorkerClient_ReadOnly_DeniesStartPlc()
+    public async Task OpennessWorkerClient_ReadOnly_DeniesRebindProbeWithVerifiedRuntimeBinding()
     {
         var binding = new ProjectSessionBinding(null);
-        var policy = new OperationAccessPolicy(McpAccessMode.ReadOnly);
-        var client = new OpennessWorkerClient(
+        using var client = new OpennessWorkerClient(
             binding,
-            workerExecutablePath: "/nonexistent/path",
-            accessPolicy: policy);
+            workerExecutablePath: FakeWorkerLocator.Locate(),
+            accessPolicy: new OperationAccessPolicy(McpAccessMode.ReadOnly));
+        await FakeWorkerBinding.BindVerifiedAsync(client, binding, "echo");
+        var bindingBefore = binding.CaptureSnapshot();
+        var sourceProjectPath = Assert.IsType<string>(bindingBefore.ProjectPath);
 
-        var result = await client.StartPlcAsync(null, null);
+        var result = await client.ProbeOpenProjectRebindAsync(
+            sourceProjectPath,
+            @"C:\Lifecycle\B.ap21");
 
         Assert.False(result.Success);
         Assert.Equal(WorkerFailureCategories.AccessDenied, result.FailureCategory);
+        Assert.True(bindingBefore.SameBinding(binding.CaptureSnapshot()));
     }
 
     [Fact]
@@ -384,7 +426,7 @@ public class ReadOnlyModeTests
         var binding = new ProjectSessionBinding(null);
         var client = new OpennessWorkerClient(binding);
 
-        Assert.Null(client.AccessPolicy);
+        Assert.Equal(McpAccessMode.ReadWrite, client.AccessPolicy.Mode);
     }
 
     #endregion
@@ -435,14 +477,16 @@ public class ReadOnlyModeTests
     public void WorkerOperationAuthorization_ReadOnly_AllowsReads()
     {
         Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "get_project_status"));
-        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "browse_project_tree"));
+        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "browse_project_tree_v3_snapshot"));
         Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "get_block_content"));
+        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "get_type_content"));
     }
 
     [Fact]
     public void WorkerOperationAuthorization_ReadOnly_AllowsTemporaryExport()
     {
         Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "get_block_content"));
+        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "get_type_content"));
     }
 
     [Fact]
@@ -454,73 +498,11 @@ public class ReadOnlyModeTests
     }
 
     [Fact]
-    public void WorkerOperationAuthorization_ReadWrite_AllowsAll()
+    public void WorkerOperationAuthorization_Full_AllowsAllClassifiedCapabilities()
     {
-        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadWrite, "update_block_logic"));
-        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadWrite, "open_project"));
-        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadWrite, "compile_check"));
-        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadWrite, "start_plc"));
-    }
-
-    [Fact]
-    public void WorkerOperationAuthorization_ReadOnly_DeniesOnlineControl()
-    {
-        Assert.NotNull(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "start_plc"));
-        Assert.NotNull(WorkerOperationAuthorization.Authorize(McpAccessMode.ReadOnly, "stop_plc"));
-    }
-
-    #endregion
-
-    #region Batch Access Mode Tests
-
-    [Fact]
-    public void ValidateAccessMode_ReadWrite_AllowsAll()
-    {
-        var ops = new[]
-        {
-            new BatchOperationRequest { OperationId = "a", Operation = "update_block_logic", BlockPath = "Main", YamlContent = "x" },
-            new BatchOperationRequest { OperationId = "b", Operation = "list_tag_tables" },
-        };
-        var errors = BatchOperationCatalog.ValidateAccessMode(ops, McpAccessMode.ReadWrite);
-        Assert.Empty(errors);
-    }
-
-    [Fact]
-    public void ValidateAccessMode_ReadOnly_DeniesWriteOperations()
-    {
-        var ops = new[]
-        {
-            new BatchOperationRequest { OperationId = "a", Operation = "update_block_logic", BlockPath = "Main", YamlContent = "x" },
-        };
-        var errors = BatchOperationCatalog.ValidateAccessMode(ops, McpAccessMode.ReadOnly);
-        Assert.Single(errors);
-        Assert.Contains("update_block_logic", errors[0]);
-        Assert.Contains("read-only", errors[0]);
-    }
-
-    [Fact]
-    public void ValidateAccessMode_ReadOnly_AllowsReadOperations()
-    {
-        var ops = new[]
-        {
-            new BatchOperationRequest { OperationId = "a", Operation = "read_cross_references" },
-            new BatchOperationRequest { OperationId = "b", Operation = "get_block_content", BlockPath = "Main" },
-        };
-        var errors = BatchOperationCatalog.ValidateAccessMode(ops, McpAccessMode.ReadOnly);
-        Assert.Empty(errors);
-    }
-
-    [Fact]
-    public void ValidateAccessMode_ReadOnly_DeniesMixedOperations()
-    {
-        var ops = new[]
-        {
-            new BatchOperationRequest { OperationId = "a", Operation = "list_tag_tables" },
-            new BatchOperationRequest { OperationId = "b", Operation = "update_block_logic", BlockPath = "Main", YamlContent = "x" },
-        };
-        var errors = BatchOperationCatalog.ValidateAccessMode(ops, McpAccessMode.ReadOnly);
-        Assert.Single(errors);
-        Assert.Contains("update_block_logic", errors[0]);
+        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.Full, "update_block_logic"));
+        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.Full, "open_project"));
+        Assert.Null(WorkerOperationAuthorization.Authorize(McpAccessMode.Full, "compile_check"));
     }
 
     #endregion
@@ -528,11 +510,11 @@ public class ReadOnlyModeTests
     #region Tool Discovery Tests
 
     [Fact]
-    public void ReadOnlyMode_HasExactlySixTools()
+    public void ReadOnlyMode_HasExactlyEightTools()
     {
         var networkReadType = typeof(NetworkOperationRequest).Assembly.GetType("TiaMcpServer.Network.NetworkReadTools");
         Assert.NotNull(networkReadType);
-        var toolNames = new[] { typeof(ProjectReadTools), typeof(ReadBatchTools), networkReadType!, typeof(OpcUaReadTools) }
+        var toolNames = new[] { typeof(ProjectBindingTools), typeof(ProjectReadTools), networkReadType!, typeof(TiaMcpServer.Plc.PlcReadTools), typeof(TiaMcpServer.Hmi.HmiReadTools), typeof(TiaMcpServer.CrossReferences.CrossReferenceReadTools), typeof(TiaMcpServer.Extensions.EngineeringReadTools) }
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
             .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
             .Where(attribute => attribute is not null)
@@ -541,19 +523,14 @@ public class ReadOnlyModeTests
             .ToArray();
 
         Assert.Equal(
-            new[]
-            {
-                "browse_project_tree", "execute_read_batch", "get_project_status",
-                "inspect_opcua_variables", "list_opcua_interfaces",
-                "network_read"
-            },
+            new[] { "bind_project", "browse_project_tree", "engineering_read", "get_project_status", "hmi_read", "network_read", "plc_read", "read_cross_references" },
             toolNames);
     }
 
     [Fact]
-    public void ReadWriteMode_HasExactlyTwentyThreeDistinctTools()
+    public void FullSurface_HasExactlyEighteenDistinctTools()
     {
-        var toolNames = typeof(ProjectLifecycleTools).Assembly
+        var toolNames = typeof(ProjectWriteTools).Assembly
             .GetTypes()
             .Where(type => type.GetCustomAttribute<McpServerToolTypeAttribute>() is not null)
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
@@ -566,13 +543,10 @@ public class ReadOnlyModeTests
         Assert.Equal(
             new[]
             {
-                "apply_write_batch", "archive_project", "browse_project_tree", "close_project",
-                "compile_check", "create_project", "delete_opcua_interface", "execute_read_batch",
-                "export_opcua_interface", "generate_opcua_interface", "get_project_status",
-                "inspect_opcua_variables", "list_opcua_interfaces", "network_read", "network_write",
-                "open_project", "preview_delete_opcua_interface", "preview_generate_opcua_interface",
-                "preview_set_opcua_interface_enabled", "preview_write_batch", "save_project",
-                "save_project_as", "set_opcua_interface_enabled"
+                "archive_project", "bind_project", "browse_project_tree", "close_project",
+                "compile_check", "create_project", "engineering_read", "engineering_write", "get_project_status", "hmi_read",
+                "network_read", "network_write", "open_project", "plc_read", "plc_write", "read_cross_references",
+                "save_project", "save_project_as"
             },
             toolNames);
     }
@@ -586,19 +560,6 @@ public class ReadOnlyModeTests
         var attr = method!.GetCustomAttribute<McpServerToolAttribute>();
         Assert.NotNull(attr);
         Assert.Equal("get_project_status", attr.Name);
-        Assert.True(attr.ReadOnly);
-        Assert.False(attr.Destructive);
-    }
-
-    [Fact]
-    public void ReadBatchTools_HasExecuteReadBatch()
-    {
-        var method = typeof(ReadBatchTools).GetMethod("ExecuteReadBatch",
-            BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance);
-        Assert.NotNull(method);
-        var attr = method!.GetCustomAttribute<McpServerToolAttribute>();
-        Assert.NotNull(attr);
-        Assert.Equal("execute_read_batch", attr.Name);
         Assert.True(attr.ReadOnly);
         Assert.False(attr.Destructive);
     }
@@ -632,19 +593,6 @@ public class ReadOnlyModeTests
             writeToolNames);
     }
 
-    [Fact]
-    public void WriteBatchTools_HasPreviewAndApply()
-    {
-        var writeToolNames = typeof(WriteBatchTools)
-            .GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
-            .Select(m => m.GetCustomAttribute<McpServerToolAttribute>()?.Name)
-            .Where(name => name is not null)
-            .OrderBy(name => name)
-            .ToArray();
-
-        Assert.Equal(new[] { "apply_write_batch", "preview_write_batch" }, writeToolNames);
-    }
-
     #endregion
 
     #region Failure Category Tests
@@ -669,138 +617,36 @@ public class ReadOnlyModeTests
 
     #endregion
 
-    #region Confirm Bypass Prevention Tests
-
-    [Fact]
-    public void ConfirmTrue_DoesNotBypassReadOnlyPolicy()
-    {
-        var policy = new OperationAccessPolicy(McpAccessMode.ReadOnly);
-        var result = policy.Authorize("update_block_logic");
-        Assert.NotNull(result);
-        Assert.False(result.Success);
-        // confirm=true is irrelevant — the policy denies categorically
-    }
-
-    [Fact]
-    public void SafetyToken_DoesNotBypassReadOnlyPolicy()
-    {
-        // The OperationAccessPolicy checks operation name only, not token presence.
-        // This is the correct behavior: read-only mode is a higher-level restriction.
-        var policy = new OperationAccessPolicy(McpAccessMode.ReadOnly);
-        var result = policy.Authorize("save_project");
-        Assert.NotNull(result);
-        Assert.False(result.Success);
-    }
-
-    #endregion
-
     #region ProjectWriteTools Coverage Tests
 
-    [Fact]
-    public async Task ProjectWriteTools_OpenProject_Preview_ReturnsTokenAndInstructions()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProjectWriteTools_ReadOnlyRejectsSingleCallsAndDryRunsBeforeTransport(bool dryRun)
     {
         using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        var result = await ProjectWriteTools.OpenProject(
-            workerClient: null!,
-            safety,
-            projectPath: @"C:\Projects\Line.ap21");
-
-        Assert.Contains("safetyToken", result);
-        Assert.Contains("open_project", result);
-        Assert.Contains("Preview only", result);
-    }
-
-    [Fact]
-    public async Task ProjectWriteTools_CreateProject_Preview_ReturnsTokenAndInstructions()
-    {
-        using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        var result = await ProjectWriteTools.CreateProject(
-            workerClient: null!,
-            safety,
-            projectDirectory: @"C:\Projects",
-            projectName: "NewProject");
-
-        Assert.Contains("safetyToken", result);
-        Assert.Contains("create_project", result);
-        Assert.Contains("Preview only", result);
-    }
-
-    [Fact]
-    public async Task ProjectWriteTools_OpenProject_ConfirmFalse_ReturnsConfirmRequired()
-    {
-        using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        var result = await ProjectWriteTools.OpenProject(
-            workerClient: null!,
-            safety,
-            projectPath: @"C:\Projects\Line.ap21",
-            confirm: false,
-            safetyToken: "fake-token");
-
-        Assert.Contains("confirm=true", result);
-        Assert.Contains("without safetyToken", result);
-    }
-
-    [Fact]
-    public async Task ProjectWriteTools_CreateProject_ConfirmFalse_ReturnsConfirmRequired()
-    {
-        using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        var result = await ProjectWriteTools.CreateProject(
-            workerClient: null!,
-            safety,
-            projectDirectory: @"C:\Projects",
-            projectName: "NewProject",
-            confirm: false,
-            safetyToken: "fake-token");
-
-        Assert.Contains("confirm=true", result);
-    }
-
-    [Fact]
-    public async Task ProjectWriteTools_SaveProject_ConfirmFalse_ReturnsConfirmRequired()
-    {
-        using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        var result = await ProjectWriteTools.SaveProject(
-            workerClient: null!,
-            safety,
-            confirm: false,
-            safetyToken: "fake-token");
-
-        Assert.Contains("confirm=true", result);
-    }
-
-    [Fact]
-    public async Task ProjectWriteTools_ArchiveProject_ConfirmFalse_ReturnsConfirmRequired()
-    {
-        using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        var result = await ProjectWriteTools.ArchiveProject(
-            workerClient: null!,
-            safety,
-            archiveDirectory: @"C:\Archive",
-            archiveName: "backup",
-            confirm: false,
-            safetyToken: "fake-token");
-
-        Assert.Contains("confirm=true", result);
-    }
-
-    [Fact]
-    public async Task ProjectWriteTools_CloseProject_ConfirmFalse_ReturnsConfirmRequired()
-    {
-        using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        var result = await ProjectWriteTools.CloseProject(
-            workerClient: null!,
-            safety,
-            confirm: false,
-            safetyToken: "fake-token");
-
-        Assert.Contains("confirm=true", result);
+        var binding = new ProjectSessionBinding(@"C:\Fixture\Line.ap21");
+        var before = binding.CaptureSnapshot();
+        using var client = new OpennessWorkerClient(binding, workerExecutablePath: "worker-must-not-start.exe",
+            accessPolicy: new OperationAccessPolicy(McpAccessMode.ReadOnly));
+        var execution = LifecycleTestCalls.Execution(client, audit);
+        var calls = new Func<Task<ModelContextProtocol.Protocol.CallToolResult>>[]
+        {
+            () => ProjectWriteTools.OpenProject(client, execution, @"C:\Fixture\Other.ap21", forceRebind: true, dryRun: dryRun),
+            () => ProjectWriteTools.CreateProject(client, execution, audit.Path, "Fixture", dryRun: dryRun),
+            () => ProjectWriteTools.SaveProject(client, execution, dryRun: dryRun),
+            () => ProjectWriteTools.SaveProjectAs(client, execution, audit.Path, "Copy", dryRun: dryRun),
+            () => ProjectWriteTools.ArchiveProject(client, execution, audit.Path, "Archive", dryRun: dryRun),
+            () => ProjectWriteTools.CloseProject(client, execution, dryRun: dryRun)
+        };
+        foreach (var call in calls)
+        {
+            LifecycleTestCalls.Rejected(await call(), WorkerFailureCategories.AccessDenied);
+            Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+            Assert.Null(typeof(OpennessWorkerClient).GetField("_transport",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client));
+        }
+        Assert.Equal(6, LifecycleTestCalls.AuditCount(audit));
     }
 
     #endregion

@@ -1,5 +1,5 @@
-using TiaMcpServer.Contracts;
-using TiaMcpServer.OpennessWorker;
+using TiaMcpServer.Contracts.Network;
+using TiaMcpServer.OpennessWorker.Openness.Network;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Network;
@@ -10,6 +10,14 @@ namespace TiaMcpServer.Tests.Network;
 /// </summary>
 public class NetworkSelectorFactoryTests
 {
+    [Fact]
+    public void LegacyIndexedSelector_RemainsStrict()
+    {
+        var path = new[] { ValidSegment(0, "Owner") };
+        path[0].TypeIdentifier = "";
+        Assert.Throws<ArgumentException>(() => NetworkSelectorFactory.Node("Station", "E1", path, 0));
+        Assert.Throws<ArgumentException>(() => NetworkSelectorFactory.Node("Station", "E1", new[] { ValidSegment(0, "Owner") }, null));
+    }
     // -------------------------------------------------------------------------
     // DeviceItem
     // -------------------------------------------------------------------------
@@ -112,17 +120,6 @@ public class NetworkSelectorFactoryTests
             () => NetworkSelectorFactory.DeviceItem(
                 "PLC_1",
                 new DeviceItemPathSegmentInfo[] { null! }));
-    }
-
-    [Fact]
-    public void DeviceItem_AcceptsMissingTypeIdentifierFromTiaChildItem()
-    {
-        var segment = ValidSegment(0, "AI channel container");
-        segment.TypeIdentifier = string.Empty;
-
-        var selector = NetworkSelectorFactory.DeviceItem("PLC_1", new[] { segment });
-
-        Assert.Equal(string.Empty, Assert.Single(selector.ItemPath!).TypeIdentifier);
     }
 
     // -------------------------------------------------------------------------

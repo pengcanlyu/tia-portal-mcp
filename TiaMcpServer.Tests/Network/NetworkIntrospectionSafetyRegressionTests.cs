@@ -1,8 +1,9 @@
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Json;
 using TiaMcpServer.Network;
+using TiaMcpServer.Tests.TestSupport;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Network;
@@ -11,40 +12,47 @@ namespace TiaMcpServer.Tests.Network;
 public class NetworkIntrospectionSafetyRegressionTests
 {
     [Fact]
-    public async Task Phase2WriteToken_AcceptsIdenticalHardwareState()
+    public async Task GuardedWrite_AppliesAfterIndependentDryRun()
     {
         using var audit = new TempAuditDirectory();
-        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(audit.Path);
+        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(
+            audit.Path,
+            startupProjectPath: "network-roundtrip");
         var operations = ConfigureOperation("network-roundtrip", "PLC_1", "node-1");
 
         var preview = AssertCanonical(await CallWriteAsync(harness, operations));
-        var token = preview.GetProperty("preview").GetProperty("safetyToken").GetString();
-        var appliedResult = await CallWriteAsync(harness, operations, confirm: true, safetyToken: token);
+        var appliedResult = await CallWriteAsync(harness, operations, dryRun: false);
         var applied = AssertCanonical(appliedResult);
 
         Assert.False(appliedResult.IsError);
-        Assert.Equal("apply", applied.GetProperty("phase").GetString());
+        Assert.Equal("applied", applied.GetProperty("phase").GetString());
         Assert.True(applied.GetProperty("success").GetBoolean());
     }
 
     [Fact]
-    public async Task Phase2WriteToken_RejectsChangedHardwareState()
+    public async Task GuardedWrite_RejectsIncompleteDiscovery()
     {
         using var audit = new TempAuditDirectory();
-        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(audit.Path);
-        var operations = ConfigureOperation("network-state-seq", "PLC_2", "node-1");
+        Directory.CreateDirectory(audit.Path);
+        using var requests = new FakeWorkerRequestLog(audit.Path);
+        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(
+            audit.Path,
+            startupProjectPath: "network-guarded-traversal-nodeEnumeration");
+        var operations = ConfigureOperation("network-guarded-traversal-nodeEnumeration", "PLC_Grouped", "node-2");
 
         var preview = AssertCanonical(await CallWriteAsync(harness, operations));
-        var token = preview.GetProperty("preview").GetProperty("safetyToken").GetString();
-        var rejectedResult = await CallWriteAsync(harness, operations, confirm: true, safetyToken: token);
+        var rejectedResult = await CallWriteAsync(harness, operations, dryRun: false);
         var rejected = AssertCanonical(rejectedResult);
 
         Assert.True(rejectedResult.IsError);
         Assert.Equal("error", rejected.GetProperty("phase").GetString());
         Assert.Equal(
-            WorkerFailureCategories.StateChanged,
+            WorkerFailureCategories.WorkerOperationFailed,
             rejected.GetProperty("error").GetProperty("category").GetString());
         Assert.Equal(JsonValueKind.Null, rejected.GetProperty("batch").ValueKind);
+        Assert.Equal(WorkerFailureCategories.WorkerOperationFailed,
+            preview.GetProperty("error").GetProperty("category").GetString());
+        Assert.DoesNotContain("configure_network_device", requests.Methods());
     }
 
     private static object[] ConfigureOperation(string projectPath, string deviceName, string nodeId)
@@ -63,18 +71,13 @@ public class NetworkIntrospectionSafetyRegressionTests
     private static ValueTask<CallToolResult> CallWriteAsync(
         McpProtocolTestHarness harness,
         object operations,
-        bool confirm = false,
-        string? safetyToken = null)
+        bool dryRun = true)
     {
         var arguments = new Dictionary<string, object?>
         {
             ["operations"] = operations,
-            ["confirm"] = confirm,
+            ["dryRun"] = dryRun,
         };
-        if (safetyToken is not null)
-        {
-            arguments["safetyToken"] = safetyToken;
-        }
 
         return harness.Client.CallToolAsync("network_write", arguments);
     }

@@ -1,6 +1,6 @@
-using TiaMcpServer.Contracts;
-using TiaMcpServer.OpennessWorker;
-using TiaMcpServer.OpennessWorker.Openness;
+using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.OpennessWorker.Openness.Block;
+using TiaMcpServer.OpennessWorker.Worker;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Block;
@@ -31,6 +31,20 @@ public class BlockMutationPostconditionTests
         Assert.Equal("created", result);
         Assert.Equal(1, importCalls);
         Assert.Equal(1, verificationCalls);
+    }
+
+    [Fact]
+    public void LegacyCreateVerifierRemainsIndependentOfImportOutcomeContract()
+    {
+        var evidence = new BlockPostconditionEvidence(
+            compileSucceeded: true,
+            reExportSucceeded: true,
+            diagnosticMessage: "Created block resolved and compiled.");
+
+        BlockPostconditionVerifier.Verify(evidence, "create");
+
+        Assert.True(evidence.CompileSucceeded);
+        Assert.True(evidence.ReExportSucceeded);
     }
 
     [Fact]

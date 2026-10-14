@@ -105,9 +105,18 @@ public class NetworkSubnetLifecycleWorkerDispatchTests
         var helperOccurrences = CountOccurrences(source, "WithSubnetLifecycleProject(request,");
         Assert.Equal(3, helperOccurrences);
         Assert.Contains("private static WorkerResponse WithSubnetLifecycleProject(", source, StringComparison.Ordinal);
-        Assert.Contains("session.EnsureConnected();", ExtractMethodBody(source, "WithSubnetLifecycleProject"), StringComparison.Ordinal);
+        Assert.Contains(
+            "WithSession(request, session =>",
+            ExtractMethodBody(source, "WithSubnetLifecycleProject"),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_sharedSession.EnsureConnected(request.ProjectPath);",
+            ExtractMethodBody(source, "WithSession"),
+            StringComparison.Ordinal);
         Assert.Contains("session.TiaPortal", ExtractMethodBody(source, "WithSubnetLifecycleProject"), StringComparison.Ordinal);
-        Assert.Contains("session.Project", ExtractMethodBody(source, "WithSubnetLifecycleProject"), StringComparison.Ordinal);
+        // Subnet lifecycle runs on any container's ProjectBase root (local sessions included).
+        Assert.DoesNotContain("RequireStandaloneOwner", ExtractMethodBody(source, "WithSubnetLifecycleProject"), StringComparison.Ordinal);
+        Assert.Equal(3, CountOccurrences(source, "session.EngineeringRoot!,"));
     }
 
     private static int CountOccurrences(string source, string value)
@@ -164,7 +173,7 @@ public class NetworkSubnetLifecycleWorkerDispatchTests
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "TiaMcpServer.sln")))
+            if (File.Exists(Path.Combine(directory.FullName, "TiaMcpServer.slnx")))
             {
                 return Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray());
             }

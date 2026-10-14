@@ -1,27 +1,43 @@
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Network;
 using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
+using TiaMcpServer.Tests.TestSupport;
 using TiaMcpServer.Worker;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Network;
 
 /// <summary>
-/// End-to-end evidence that the dedicated network tools use a single hardware snapshot for
-/// each preview/apply attempt, bind tokens to the exact ordered request, and — for the migrated
-/// <c>network_read</c> — return each worker payload as declared JSON rather than a nested string.
+/// Offline FakeWorker evidence for dedicated Network reads and guarded writes, exact ordered
+/// requests and typed payloads without nested JSON strings. Previews use explicit dryRun:true;
+/// actual calls re-plan and verify under the pinned binding without Network tokens.
 /// </summary>
+[Collection(RealWorkerProcessCollection.Name)]
 public class NetworkOperationFakeWorkerTests
 {
     private const string Scenario = "network-roundtrip";
 
-    private static OpennessWorkerClient CreateClient()
+    private static OpennessWorkerClient CreateClient(ProjectSessionBinding? binding = null)
         => new(
-            new ProjectSessionBinding(null),
+            binding ?? new ProjectSessionBinding(null),
             logger: null,
             workerExecutablePath: FakeWorkerLocator.Locate());
+
+    private static OpennessWorkerClient CreateWriteClient(
+        TempAuditDirectory audit,
+        out WriteExecution safety,
+        string projectPath)
+    {
+        var binding = new ProjectSessionBinding(null);
+        var client = CreateClient(binding);
+        NetworkVerifiedWriteFixture.VerifyAsync(client, binding, projectPath).GetAwaiter().GetResult();
+        safety = NetworkGuardedWriteFixture.CreateRunner(client, audit.Path);
+        return client;
+    }
 
     private static NetworkOperationRequest ReadHardware(string operationId) => new()
     {
@@ -44,7 +60,7 @@ public class NetworkOperationFakeWorkerTests
         Operation = "add_network_device",
         ProjectPath = Scenario,
         TypeIdentifier = "OrderNumber:TEST",
-        DeviceName = "PLC_1",
+        DeviceName = "AddedPLC",
     };
 
     private static NetworkOperationRequest ConfigureDevice(string operationId, string ipAddress = "192.168.0.10") => new()
@@ -56,20 +72,269 @@ public class NetworkOperationFakeWorkerTests
         Changes = new NetworkDeviceChanges { IpAddress = ipAddress },
     };
 
+    private static NetworkOperationRequest QualifiedConfigure(string id, int position = 32768) => new()
+    {
+        OperationId = id, Operation = "configure_network_device", Target = new() { Kind = "node", DeviceName = "S7-1500/ET200MP station_1", NodeId = "E1",
+            InterfacePath = new[] { new NetworkInterfacePathSegment { Name = "PLC_DP", PositionNumber = 1 },
+                new NetworkInterfacePathSegment { Name = position == 32768 ? "PROFINET interface_1" : "PROFINET interface_2", PositionNumber = position } } },
+        Changes = new() { IpAddress = "192.168.12.99" }
+    };
+
+    [Fact]
+    public async Task PreparedDomainRequest_DetachesCallerOwnerBeforeReplanAndDispatch()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-read");
+        var operation = QualifiedConfigure("prepare");
+        var domain = new NetworkWriteDomain(fixture.Client);
+        Assert.True((await domain.PlanAsync("network-qualified-read", new[] { operation })).Success);
+        operation.Target!.InterfacePath![1].Name = "PROFINET interface_2";
+        operation.Target.InterfacePath[1].PositionNumber = 33024;
+        Assert.True((await domain.ReplanAsync("network-qualified-read", operation)).Success);
+        var result = await domain.MutateAsync("network-qualified-read", operation);
+        Assert.Equal("succeeded", domain.Project(operation, result).Status);
+        var state = (await NetworkWritePlanner.ReadCurrentStateAsync(fixture.Client, "network-qualified-read")).State!;
+        Assert.Equal("192.168.12.99", state.Devices[0].Items[0].Items[0].NetworkInterfaces[0].Nodes[0].IpAddress);
+        Assert.Equal("192.168.13.20", state.Devices[0].Items[0].Items[1].NetworkInterfaces[0].Nodes[0].IpAddress);
+    }
+
+    [Fact]
+    public async Task ConfigureX1_DoesNotChangeX2()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-read");
+        var operation = QualifiedConfigure("X1");
+        var result = await NetworkWorkerInvoker.InvokeWriteAsync(fixture.Client, operation, "network-qualified-read");
+        Assert.True(result.Success, result.Error);
+        Assert.Equal("succeeded", NetworkPayloadContract.Project(operation, result, true).Status);
+        var snapshot = await NetworkWritePlanner.ReadCurrentStateAsync(fixture.Client, "network-qualified-read");
+        Assert.True(snapshot.Success, snapshot.Error);
+        var owners = snapshot.State!.Devices[0].Items[0].Items;
+        Assert.Equal("192.168.12.99", owners[0].NetworkInterfaces[0].Nodes[0].IpAddress);
+        Assert.Equal("192.168.13.20", owners[1].NetworkInterfaces[0].Nodes[0].IpAddress);
+        var second = QualifiedConfigure("X2", 33024); second.Changes = new() { IpAddress = "192.168.13.99" };
+        Assert.True((await NetworkWorkerInvoker.InvokeWriteAsync(fixture.Client, second, "network-qualified-read")).Success);
+        snapshot = await NetworkWritePlanner.ReadCurrentStateAsync(fixture.Client, "network-qualified-read");
+        owners = snapshot.State!.Devices[0].Items[0].Items;
+        Assert.Equal("192.168.12.99", owners[0].NetworkInterfaces[0].Nodes[0].IpAddress);
+        Assert.Equal("192.168.13.99", owners[1].NetworkInterfaces[0].Nodes[0].IpAddress);
+    }
+
+    [Fact]
+    public async Task QualifiedPartialSkip_RetainsAppliedIdentityAndStops()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-partial");
+        var first = QualifiedConfigure("partial"); first.Changes = new() { IpAddress = "192.168.12.99", SubnetMask = "255.255.255.0" };
+        var response = await fixture.RunAsync(false, first, QualifiedConfigure("later", 33024));
+        Assert.False(response.Success); Assert.Null(response.Error);
+        var result = response.Batch!.Operations[0].Result!.Value;
+        Assert.Equal("Address", Assert.Single(result.GetProperty("appliedSettings").EnumerateObject()).Name);
+        Assert.Equal("SubnetMask", Assert.Single(result.GetProperty("skippedSettings").EnumerateObject()).Name);
+        var path = result.GetProperty("verification").GetProperty("identity").GetProperty("interfacePath");
+        Assert.Equal(JsonValueKind.Array, path.ValueKind);
+        Assert.Equal(32768, path[1].GetProperty("positionNumber").GetInt32());
+        Assert.Equal("earlierOperationFailed", response.Batch.Operations[1].SkipReason);
+        var snapshot = await NetworkWritePlanner.ReadCurrentStateAsync(fixture.Client, "network-qualified-partial");
+        Assert.Equal("192.168.13.20", snapshot.State!.Devices[0].Items[0].Items[1].NetworkInterfaces[0].Nodes[0].IpAddress);
+    }
+
+    [Fact]
+    public async Task QualifiedPartialSkip_ExecutionFailsWhileVerificationProvesAppliedAndPreservedSettings()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-partial");
+        var before = await NetworkWritePlanner.ReadCurrentStateAsync(fixture.Client, "network-qualified-partial");
+        var priorMask = before.State!.Devices[0].Items[0].Items[0].NetworkInterfaces[0].Nodes[0].SubnetMask;
+        Assert.NotNull(priorMask);
+        var operation = QualifiedConfigure("partial"); operation.Changes = new() { IpAddress = "192.168.12.99", SubnetMask = "255.255.0.0" };
+        var response = await fixture.RunAsync(false, operation);
+        // verification.success covers evidence only; execution failure lives in batch and root success.
+        Assert.False(response.Success);
+        Assert.Equal(TiaMcpServer.OperationBatches.OperationBatchStatus.Failed, response.Batch!.Operations[0].Status);
+        Assert.True(response.Verification!.Success);
+        var preserved = Assert.Single(response.Verification.FinalChecks, c => c.Kind == "node" && c.Field == "SubnetMask");
+        Assert.Equal(priorMask, preserved.Expected);
+        Assert.Equal("passed", preserved.Status);
+    }
+
+    [Fact]
+    public async Task QualifiedAllSkipped_FinalCheckProvesSkippedSettingWasPreserved()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-partial");
+        var before = await NetworkWritePlanner.ReadCurrentStateAsync(fixture.Client, "network-qualified-partial");
+        var priorMask = before.State!.Devices[0].Items[0].Items[0].NetworkInterfaces[0].Nodes[0].SubnetMask;
+        Assert.NotNull(priorMask);
+        var operation = QualifiedConfigure("skipped"); operation.Changes = new() { SubnetMask = "255.255.0.0" };
+        var response = await fixture.RunAsync(false, operation);
+        Assert.False(response.Success);
+        Assert.Equal("not_required", response.Verification!.Operations[0].Status);
+        var preserved = Assert.Single(response.Verification.FinalChecks, c => c.Kind == "node" && c.Field == "SubnetMask");
+        Assert.Equal(priorMask, preserved.Expected);
+        Assert.Equal(priorMask, preserved.Observed);
+        Assert.Equal("passed", preserved.Status);
+        Assert.True(response.Verification.Success);
+    }
+
+    [Fact]
+    public async Task QualifiedAllSkipped_UnreadablePriorValueLeavesPreservationUnverified()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-partial");
+        // The second owner's node has no readable subnet mask before the write.
+        var operation = QualifiedConfigure("unreadable", 33024); operation.Changes = new() { SubnetMask = "255.255.0.0" };
+        var response = await fixture.RunAsync(false, operation);
+        var preserved = Assert.Single(response.Verification!.FinalChecks, c => c.Kind == "node" && c.Field == "SubnetMask");
+        Assert.Equal("unverified", preserved.Status);
+        Assert.False(response.Verification.Success);
+    }
+
+    [Fact]
+    public async Task QualifiedConfigure_IdentityIsTypedWithoutNestedJson()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-read");
+        var response = await fixture.RunAsync(false, QualifiedConfigure("typed"));
+        Assert.True(response.Success);
+        using var document = JsonDocument.Parse(TiaMcpServer.Json.CanonicalJson.Serialize(response));
+        var root = document.RootElement;
+        var identities = new[]
+        {
+            root.GetProperty("batch").GetProperty("operations")[0].GetProperty("result").GetProperty("verification").GetProperty("identity"),
+            root.GetProperty("verification").GetProperty("operations")[0].GetProperty("evidence").GetProperty("identity"),
+        };
+        foreach (var identity in identities)
+        {
+            Assert.Equal("S7-1500/ET200MP station_1", identity.GetProperty("deviceName").GetString());
+            Assert.Equal(JsonValueKind.Array, identity.GetProperty("interfacePath").ValueKind);
+            Assert.Equal(JsonValueKind.Null, identity.GetProperty("subnetId").ValueKind);
+            AssertNoNestedJson(identity);
+        }
+    }
+
+    [Fact]
+    public async Task QualifiedConfigure_FinalChecksCarryTypedSubjectWithoutNestedJson()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-read");
+        var response = await fixture.RunAsync(false, QualifiedConfigure("typed"));
+        Assert.True(response.Success);
+        using var document = JsonDocument.Parse(TiaMcpServer.Json.CanonicalJson.Serialize(response));
+        var root = document.RootElement;
+        var finalChecks = root.GetProperty("verification").GetProperty("finalChecks").EnumerateArray().ToArray();
+        var address = Assert.Single(finalChecks, c => c.GetProperty("field").GetString() == "Address");
+        Assert.Equal("node", address.GetProperty("kind").GetString());
+        Assert.Equal(JsonValueKind.Null, address.GetProperty("operationId").ValueKind);
+        var subject = address.GetProperty("subject");
+        Assert.Equal("S7-1500/ET200MP station_1", subject.GetProperty("deviceName").GetString());
+        Assert.Equal("E1", subject.GetProperty("nodeId").GetString());
+        Assert.Equal("PROFINET interface_1", subject.GetProperty("interfacePath")[1].GetProperty("name").GetString());
+        var exists = Assert.Single(finalChecks, c => c.GetProperty("field").GetString() == "exists");
+        Assert.Equal("node", exists.GetProperty("kind").GetString());
+        Assert.Equal(JsonValueKind.Null, exists.GetProperty("subject").GetProperty("subnetId").ValueKind);
+        foreach (var check in finalChecks)
+        {
+            Assert.False(check.TryGetProperty("name", out _));
+            AssertNoNestedJson(check.GetProperty("subject"));
+        }
+    }
+
+    private static void AssertNoNestedJson(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object: foreach (var member in element.EnumerateObject()) AssertNoNestedJson(member.Value); break;
+            case JsonValueKind.Array: foreach (var value in element.EnumerateArray()) AssertNoNestedJson(value); break;
+            case JsonValueKind.String:
+                var text = element.GetString()!;
+                Assert.False(text.Contains('{') || text.Contains('['), $"Nested JSON string: {text}");
+                break;
+        }
+    }
+
+    [Fact]
+    public async Task QualifiedUnknownDependency_RefusesBeforeScalarSetter()
+    {
+        using var audit = new TempAuditDirectory();
+        using var fixture = await NetworkGuardedWriteFixture.CreateAsync(audit, "network-qualified-read");
+        var operation = QualifiedConfigure("unknown"); operation.Changes = new() { IpAddress = "192.168.12.99", IoSystem = new() { SubnetId = "missing", Number = 1 } };
+        var result = await NetworkWorkerInvoker.InvokeWriteAsync(fixture.Client, operation, "network-qualified-read");
+        Assert.False(result.Success);
+        var snapshot = await NetworkWritePlanner.ReadCurrentStateAsync(fixture.Client, "network-qualified-read");
+        Assert.Equal("192.168.12.2", snapshot.State!.Devices[0].Items[0].Items[0].NetworkInterfaces[0].Nodes[0].IpAddress);
+    }
+
+    [Theory]
+    [InlineData("network-config-partial", true)]
+    [InlineData("network-config-all-skipped", false)]
+    public async Task NetworkWrite_CompletedSparseConfigurationFailureRetainsResultAndSkipsLaterWrites(
+        string scenario,
+        bool addressApplied)
+    {
+        using var audit = new TempAuditDirectory();
+        using var client = CreateWriteClient(audit, out var safety, scenario);
+        var operations = new[]
+        {
+            new NetworkOperationRequest
+            {
+                OperationId = "configure",
+                Operation = "configure_network_device",
+                ProjectPath = scenario,
+                Target = new NetworkObjectTarget { DeviceName = "PLC_1", NodeId = "node-1" },
+                Changes = new NetworkDeviceChanges
+                {
+                    IpAddress = "192.168.0.10",
+                    IoSystem = new NetworkIoSystemTarget { SubnetId = "subnet-1", Number = 100 },
+                },
+            },
+            new NetworkOperationRequest
+            {
+                OperationId = "later",
+                Operation = "add_network_device",
+                ProjectPath = scenario,
+                TypeIdentifier = "OrderNumber:TEST",
+                DeviceName = "LaterDevice",
+            },
+        };
+
+        var applied = await NetworkWriteTools.NetworkWrite(client, safety, operations, dryRun: false);
+
+        Assert.False(applied.IsError, Text(applied));
+        var root = Structured(applied);
+        Assert.False(root.GetProperty("success").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("error").ValueKind);
+        var items = root.GetProperty("batch").GetProperty("operations");
+        Assert.Equal("failed", items[0].GetProperty("status").GetString());
+        Assert.Equal("worker_operation_failed", items[0].GetProperty("failure").GetProperty("category").GetString());
+        var result = items[0].GetProperty("result");
+        Assert.Equal("PLC_1", result.GetProperty("deviceName").GetString());
+        Assert.Equal(
+            addressApplied ? new[] { "Address" } : Array.Empty<string>(),
+            result.GetProperty("appliedSettings").EnumerateObject().Select(property => property.Name));
+        Assert.Equal(
+            addressApplied ? new[] { "IoSystem" } : new[] { "Address", "IoSystem" },
+            result.GetProperty("skippedSettings").EnumerateObject().Select(property => property.Name));
+        Assert.StartsWith("seq:", result.GetProperty("messages")[0].GetString());
+        Assert.Equal("skipped", items[1].GetProperty("status").GetString());
+        Assert.Equal("earlierOperationFailed", items[1].GetProperty("skipReason").GetString());
+    }
+
     [Fact]
     public async Task NetworkRead_HardwareAndCatalogSucceedInRequestedOrderWithDeclaredJsonResults()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath(Scenario);
         using var client = CreateClient();
 
         var result = await NetworkReadTools.NetworkRead(
             client,
             new[] { ReadHardware("hardware"), SearchCatalog("catalog") });
 
-        Assert.False(result.IsError);
+        Assert.False(result.IsError, Text(result));
         var root = Assert.IsType<JsonElement>(result.StructuredContent);
         var operations = root.GetProperty("batch").GetProperty("operations");
 
-        Assert.True(root.GetProperty("success").GetBoolean());
+        Assert.True(root.GetProperty("success").GetBoolean(), root.GetRawText());
         Assert.Equal("hardware", operations[0].GetProperty("operationId").GetString());
         Assert.Equal("succeeded", operations[0].GetProperty("status").GetString());
         Assert.Equal(
@@ -90,11 +355,12 @@ public class NetworkOperationFakeWorkerTests
     [Fact]
     public async Task NetworkRead_MultiHomedPcStationExposesBothNodesWithDistinctNodeIds()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath(Scenario);
         using var client = CreateClient();
 
         var result = await NetworkReadTools.NetworkRead(client, new[] { ReadHardware("hardware") });
 
-        Assert.False(result.IsError);
+        Assert.False(result.IsError, Text(result));
         var hardware = Assert.IsType<JsonElement>(result.StructuredContent)
             .GetProperty("batch")
             .GetProperty("operations")[0]
@@ -121,100 +387,41 @@ public class NetworkOperationFakeWorkerTests
     }
 
     [Fact]
-    public async Task NetworkWrite_UsesOneSnapshotPerAttemptAndEnforcesTokenLifecycle()
+    public async Task NetworkWrite_ExecutesInCallerOrderWithTypedResults()
     {
         using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        using var client = CreateClient();
+        using var client = CreateWriteClient(audit, out var safety, Scenario);
         var operations = new[] { AddDevice("add"), ConfigureDevice("configure") };
 
-        var preview = await NetworkWriteTools.NetworkWrite(client, safety, operations);
-        var token = SafetyToken(preview);
+        var preview = await NetworkWriteTools.NetworkWrite(client, safety, operations, dryRun: true);
 
-        var applied = await NetworkWriteTools.NetworkWrite(client, safety, operations, confirm: true, safetyToken: token);
+        var applied = await NetworkWriteTools.NetworkWrite(client, safety, operations, dryRun: false);
         var results = Structured(applied).GetProperty("batch").GetProperty("operations");
-        Assert.True(Structured(applied).GetProperty("success").GetBoolean());
+        Assert.True(Structured(applied).GetProperty("success").GetBoolean(), Text(applied));
         Assert.Equal("add", results[0].GetProperty("operationId").GetString());
         Assert.Equal("succeeded", results[0].GetProperty("status").GetString());
 
-        // Each result is the declared contract type as JSON, never a nested JSON string. The
-        // scenario stamps its request sequence into the contract's own free-text members, so the
-        // apply is still provably the third and fourth worker requests of this round trip.
+        // Each result is the declared contract type as JSON, never a nested JSON string.
+        // Typed identities and outcomes below establish the fixture result, not a fixed request sequence.
         Assert.Equal(JsonValueKind.Object, results[0].GetProperty("result").ValueKind);
-        Assert.Equal("seq:3", results[0].GetProperty("result").GetProperty("warnings")[0].GetString());
+        Assert.Equal("AddedPLC", results[0].GetProperty("result").GetProperty("deviceName").GetString());
         Assert.Equal("configure", results[1].GetProperty("operationId").GetString());
         Assert.Equal("succeeded", results[1].GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Object, results[1].GetProperty("result").ValueKind);
-        Assert.Equal("seq:4", results[1].GetProperty("result").GetProperty("messages")[0].GetString());
+        Assert.Equal("PLC_1", results[1].GetProperty("result").GetProperty("deviceName").GetString());
 
-        var replay = await NetworkWriteTools.NetworkWrite(client, safety, operations, confirm: true, safetyToken: token);
-        Assert.True(replay.IsError);
-        Assert.Contains("Safety token", Text(replay));
 
-        var secondToken = SafetyToken(await NetworkWriteTools.NetworkWrite(client, safety, operations));
-
-        var changedInput = new[] { AddDevice("add"), ConfigureDevice("configure", ipAddress: "192.168.0.11") };
-        var changedApply = await NetworkWriteTools.NetworkWrite(
-            client,
-            safety,
-            changedInput,
-            confirm: true,
-            safetyToken: secondToken);
-
-        Assert.True(changedApply.IsError);
-        Assert.Contains("input does not match", Text(changedApply));
     }
 
     /// <summary>
-    /// The multi-homed device (Task 7) has two REAL, existing nodes - node-plc and node-db - not a
-    /// missing one and not an ambiguous one. A preview resolved against node-plc binds target
-    /// evidence (device item path, interface, node name/id) specific to that node; retargeting the
-    /// SAME operationId at apply time to the other, equally real node must still be rejected as a
-    /// different target, since the safety token binds exactly which node was matched, not merely
-    /// that some node exists.
+    /// Duplicate node IDs on one device fail the exact-one selector before mutation. This is
+    /// offline evidence through NetworkWriteTools/FakeWorker, not live TIA qualification.
     /// </summary>
     [Fact]
-    public async Task NetworkWrite_ChangedNodeIdBetweenPreviewAndApplyIsRejectedAsADifferentTarget()
+    public async Task NetworkWrite_AmbiguousNodeIdFailsClosedBeforeAnyWrite()
     {
         using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        using var client = CreateClient();
-        const string scenario = "multi-homed-network";
-
-        static NetworkOperationRequest[] Operations(string scenario, string nodeId) => new[]
-        {
-            new NetworkOperationRequest
-            {
-                OperationId = "configure",
-                Operation = "configure_network_device",
-                ProjectPath = scenario,
-                Target = new NetworkObjectTarget { DeviceName = "PC_1", NodeId = nodeId },
-                Changes = new NetworkDeviceChanges { IpAddress = "192.168.0.55" },
-            },
-        };
-
-        var preview = await NetworkWriteTools.NetworkWrite(client, safety, Operations(scenario, "node-plc"));
-        var token = SafetyToken(preview);
-
-        var applied = await NetworkWriteTools.NetworkWrite(
-            client, safety, Operations(scenario, "node-db"), confirm: true, safetyToken: token);
-
-        Assert.True(applied.IsError);
-        Assert.Contains("different target", Text(applied));
-    }
-
-    /// <summary>
-    /// Two nodes on the SAME device reporting the SAME nodeId: NetworkIdentityResolver's
-    /// ambiguous-match rule must fail the preview closed (postcondition_failed) and issue no token,
-    /// proven here through the actual NetworkWriteTools/FakeWorker wiring rather than only the pure
-    /// resolver unit tests.
-    /// </summary>
-    [Fact]
-    public async Task NetworkWrite_AmbiguousNodeIdFailsClosedWithNoTokenIssued()
-    {
-        using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
-        using var client = CreateClient();
+        using var client = CreateWriteClient(audit, out var safety, "network-ambiguous-node");
 
         var result = await NetworkWriteTools.NetworkWrite(
             client,
@@ -235,9 +442,8 @@ public class NetworkOperationFakeWorkerTests
         Assert.True(result.IsError);
         Assert.Equal("error", root.GetProperty("phase").GetString());
         Assert.Equal(
-            WorkerFailureCategories.PostconditionFailed,
+            WorkerFailureCategories.TargetAmbiguous,
             root.GetProperty("error").GetProperty("category").GetString());
-        Assert.Equal(0, safety.ActiveTokenCount);
     }
 
     /// <summary>
@@ -250,8 +456,8 @@ public class NetworkOperationFakeWorkerTests
     public async Task NetworkWrite_MismatchedSubnetAndIoSystemPairingIsRejectedBeforeAnyWorkerCall()
     {
         using var audit = new TempAuditDirectory();
-        var safety = audit.CreateSafety();
         using var client = CreateClient();
+        var safety = NetworkGuardedWriteFixture.CreateRunner(client, audit.Path);
 
         var result = await NetworkWriteTools.NetworkWrite(
             client,
@@ -274,7 +480,6 @@ public class NetworkOperationFakeWorkerTests
 
         Assert.True(result.IsError);
         Assert.Contains("must name the same subnet", Text(result));
-        Assert.Equal(0, safety.ActiveTokenCount);
     }
 
     // --- Phase 3 read round-trips -----------------------------------------------
@@ -282,6 +487,7 @@ public class NetworkOperationFakeWorkerTests
     [Fact]
     public async Task ListNetworkObjects_RoundTripReturnsSixItemsWithCommunicationConnectionUnselectable()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath("list-network-objects-success");
         using var client = CreateClient();
 
         var result = await NetworkReadTools.NetworkRead(
@@ -297,7 +503,7 @@ public class NetworkOperationFakeWorkerTests
                 },
             });
 
-        Assert.False(result.IsError);
+        Assert.False(result.IsError, Text(result));
         var operation = Structured(result)
             .GetProperty("batch")
             .GetProperty("operations")[0];
@@ -324,6 +530,7 @@ public class NetworkOperationFakeWorkerTests
     [Fact]
     public async Task InspectNetworkObject_RoundTripReturnsNineAttributesAndEvidence()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath("inspect-network-object-success");
         using var client = CreateClient();
 
         var result = await NetworkReadTools.NetworkRead(
@@ -339,7 +546,7 @@ public class NetworkOperationFakeWorkerTests
                 },
             });
 
-        Assert.False(result.IsError);
+        Assert.False(result.IsError, Text(result));
         var operation = Structured(result)
             .GetProperty("batch")
             .GetProperty("operations")[0];
@@ -386,6 +593,7 @@ public class NetworkOperationFakeWorkerTests
         string operationName,
         string scenario)
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath(scenario);
         using var client = CreateClient();
         var target = operationName == "inspect_network_object"
             ? new NetworkObjectTarget { Kind = "node", DeviceName = "PLC_1", NodeId = "node-1" }
@@ -409,7 +617,7 @@ public class NetworkOperationFakeWorkerTests
             });
 
         // The batch ran (tool call succeeded), but the item failed.
-        Assert.False(result.IsError);
+        Assert.False(result.IsError, Text(result));
         var operation = Structured(result).GetProperty("batch").GetProperty("operations")[0];
         Assert.Equal("failed", operation.GetProperty("status").GetString());
         Assert.Equal("protocol_error", operation.GetProperty("failure").GetProperty("category").GetString());
@@ -418,6 +626,7 @@ public class NetworkOperationFakeWorkerTests
     [Fact]
     public async Task ListNetworkObjects_LargeListScenarioReturnsCursorWithTwentyItems()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath("list-network-objects-large");
         using var client = CreateClient();
 
         var result = await NetworkReadTools.NetworkRead(
@@ -434,7 +643,7 @@ public class NetworkOperationFakeWorkerTests
                 },
             });
 
-        Assert.False(result.IsError);
+        Assert.False(result.IsError, Text(result));
         var operation = Structured(result).GetProperty("batch").GetProperty("operations")[0];
         Assert.Equal("succeeded", operation.GetProperty("status").GetString());
 
@@ -450,10 +659,4 @@ public class NetworkOperationFakeWorkerTests
     private static string Text(CallToolResult result)
         => Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 
-    private static string SafetyToken(CallToolResult preview)
-    {
-        var token = Structured(preview).GetProperty("preview").GetProperty("safetyToken").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(token));
-        return token!;
-    }
 }

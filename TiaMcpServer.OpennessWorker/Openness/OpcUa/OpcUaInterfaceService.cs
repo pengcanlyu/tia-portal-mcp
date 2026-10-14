@@ -1,4 +1,5 @@
 using System.Text;
+using TiaMcpServer.OpennessWorker.Openness.Plc;
 using System.Text.Json;
 using System.Security.Cryptography;
 using Siemens.Engineering;
@@ -16,9 +17,9 @@ internal static class OpcUaInterfaceService
         WriteIndented = true
     };
 
-    public static object List(Project project, string? plcName)
+    public static object List(ProjectBase project, string? plcName)
     {
-        var resolved = PlcSoftwareLocator.FindWithIdentity(project, plcName);
+        var resolved = PlcSoftwareLocator.FindUnique(project, plcName);
         var software = resolved.Software;
         var interfaces = GetInterfaces(software);
 
@@ -33,21 +34,25 @@ internal static class OpcUaInterfaceService
     }
 
     public static object Inspect(
-        Project project,
+        ProjectBase project,
         string? plcName,
         string interfaceName,
         string interfaceUri,
         bool keepFolderStructure,
         bool includeVariables,
-        int maxVariables)
+        int maxVariables,
+        string? allowedSourcePathsPath,
+        string? allowedSourcePathsSha256)
     {
-        var resolved = PlcSoftwareLocator.FindWithIdentity(project, plcName);
+        var resolved = PlcSoftwareLocator.FindUnique(project, plcName);
         var software = resolved.Software;
+        var allowedSourcePaths = OpcUaSourcePathFilter.Load(allowedSourcePathsPath, allowedSourcePathsSha256);
         var generated = OpcUaInterfaceGenerator.Generate(
             software,
             interfaceName,
             interfaceUri,
-            keepFolderStructure);
+            keepFolderStructure,
+            allowedSourcePaths);
 
         return BuildGenerationInfo(
             plcName, resolved.DeviceName, software.Name, interfaceName, interfaceUri,
@@ -55,7 +60,7 @@ internal static class OpcUaInterfaceService
     }
 
     public static object Export(
-        Project project,
+        ProjectBase project,
         string? plcName,
         string interfaceName,
         string exportPath,
@@ -67,7 +72,7 @@ internal static class OpcUaInterfaceService
             EnsureOutputPath(catalogPath!, ".json");
         }
 
-        var resolved = PlcSoftwareLocator.FindWithIdentity(project, plcName);
+        var resolved = PlcSoftwareLocator.FindUnique(project, plcName);
         var software = resolved.Software;
         var serverInterface = FindInterface(software, interfaceName)
             ?? throw new InvalidOperationException($"OPC UA server interface '{interfaceName}' was not found.");
@@ -130,7 +135,7 @@ internal static class OpcUaInterfaceService
     }
 
     public static object Generate(
-        Project project,
+        ProjectBase project,
         string? plcName,
         string interfaceName,
         string interfaceUri,
@@ -139,7 +144,9 @@ internal static class OpcUaInterfaceService
         bool replaceExisting,
         string? author,
         string? exportPath,
-        string? catalogPath)
+        string? catalogPath,
+        string? allowedSourcePathsPath,
+        string? allowedSourcePathsSha256)
     {
         if (!string.IsNullOrWhiteSpace(exportPath))
         {
@@ -151,7 +158,7 @@ internal static class OpcUaInterfaceService
             EnsureOutputPath(catalogPath!, ".json");
         }
 
-        var resolved = PlcSoftwareLocator.FindWithIdentity(project, plcName);
+        var resolved = PlcSoftwareLocator.FindUnique(project, plcName);
         var software = resolved.Software;
         var composition = GetComposition(software);
         var existing = FindInterface(composition, interfaceName);
@@ -163,11 +170,13 @@ internal static class OpcUaInterfaceService
                 $"OPC UA server interface '{interfaceName}' already exists. Set replaceExisting=true only after reviewing the preview.");
         }
 
+        var allowedSourcePaths = OpcUaSourcePathFilter.Load(allowedSourcePathsPath, allowedSourcePathsSha256);
         var generated = OpcUaInterfaceGenerator.Generate(
             software,
             interfaceName,
             interfaceUri,
-            keepFolderStructure);
+            keepFolderStructure,
+            allowedSourcePaths);
 
         var workingDirectory = Path.Combine(Path.GetTempPath(), "tia-mcp-opcua-import", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workingDirectory);
@@ -223,6 +232,9 @@ internal static class OpcUaInterfaceService
                 author = string.IsNullOrWhiteSpace(author) ? "TIA MCP" : author,
                 exportPath = string.IsNullOrWhiteSpace(exportPath) ? null : Path.GetFullPath(exportPath!),
                 catalogPath = string.IsNullOrWhiteSpace(catalogPath) ? null : Path.GetFullPath(catalogPath!),
+                allowedSourcePathsPath = string.IsNullOrWhiteSpace(allowedSourcePathsPath)
+                    ? null
+                    : Path.GetFullPath(allowedSourcePathsPath!),
                 generation = BuildGenerationInfo(
                     plcName, resolved.DeviceName, software.Name, interfaceName, interfaceUri,
                     generated, includeVariables: false, maxVariables: 0)
@@ -258,9 +270,9 @@ internal static class OpcUaInterfaceService
         }
     }
 
-    public static object SetEnabled(Project project, string? plcName, string interfaceName, bool enabled)
+    public static object SetEnabled(ProjectBase project, string? plcName, string interfaceName, bool enabled)
     {
-        var software = PlcSoftwareLocator.Find(project, plcName);
+        var software = PlcSoftwareLocator.FindUnique(project, plcName).Software;
         var serverInterface = FindInterface(software, interfaceName)
             ?? throw new InvalidOperationException($"OPC UA server interface '{interfaceName}' was not found.");
         var previous = serverInterface.Enabled;
@@ -269,9 +281,9 @@ internal static class OpcUaInterfaceService
         return new { interfaceName, previousEnabled = previous, enabled = serverInterface.Enabled };
     }
 
-    public static object Delete(Project project, string? plcName, string interfaceName)
+    public static object Delete(ProjectBase project, string? plcName, string interfaceName)
     {
-        var software = PlcSoftwareLocator.Find(project, plcName);
+        var software = PlcSoftwareLocator.FindUnique(project, plcName).Software;
         var serverInterface = FindInterface(software, interfaceName)
             ?? throw new InvalidOperationException($"OPC UA server interface '{interfaceName}' was not found.");
         var info = ToInfo(serverInterface);
@@ -374,9 +386,7 @@ internal static class OpcUaInterfaceService
 
     private static string ComputeFingerprint(string xml)
     {
-        using var sha256 = SHA256.Create();
-        var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(xml));
-        return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
+        return OpcUaModelFingerprint.Compute(xml);
     }
 
     private static object ToInfo(ServerInterface item)

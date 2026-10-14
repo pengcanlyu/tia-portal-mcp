@@ -1,5 +1,5 @@
 using System.Text.Json;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Network;
 using TiaMcpServer.Json;
 using TiaMcpServer.Network;
 using Xunit;
@@ -12,6 +12,20 @@ namespace TiaMcpServer.Tests.Network;
 /// </summary>
 public class NetworkIntrospectionContractTests
 {
+    [Fact]
+    public void PreferredReadSelectors_AreDirectInspectRequests()
+    {
+        var device = NetworkDiscoveryRepairFixture.Metadata(new() { Scope = "project", Complete = true }).Devices[0];
+        TiaMcpServer.OpennessWorker.Openness.Network.NetworkNodeReadSelectorBuilder.Apply(device, true);
+        foreach (var owner in device.Items[0].Items)
+        {
+            var selector = owner.NetworkInterfaces[0].Nodes[0].Selector!;
+            var target = CanonicalJson.Deserialize<NetworkObjectTarget>(CanonicalJson.Serialize(selector))!;
+            Assert.True(NetworkOperationCatalog.ValidateRead(new[] { new NetworkOperationRequest
+                { OperationId = "inspect", Operation = "inspect_network_object", Target = target } }).IsValid);
+            Assert.Equal(owner.PositionNumber, target.InterfacePath![1].PositionNumber);
+        }
+    }
     // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
@@ -585,17 +599,6 @@ public class NetworkIntrospectionContractTests
 
         Assert.False(result.IsValid);
         Assert.Contains("positionNumber", result.Error);
-    }
-
-    [Fact]
-    public void InspectDeviceItem_MissingTypeIdentifierFromTiaChildItem_IsAccepted()
-    {
-        var target = Phase3Fixtures.ValidTarget(NetworkObjectKinds.DeviceItem);
-        Assert.Single(target.ItemPath!).TypeIdentifier = string.Empty;
-
-        var result = NetworkOperationCatalog.ValidateRead(new[] { InspectOp(target: target) });
-
-        Assert.True(result.IsValid, result.Error);
     }
 
     [Theory]

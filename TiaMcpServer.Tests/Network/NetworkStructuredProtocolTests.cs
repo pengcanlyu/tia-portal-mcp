@@ -1,9 +1,10 @@
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Json;
 using TiaMcpServer.Network;
 using TiaMcpServer.OperationBatches;
+using TiaMcpServer.Tests.TestSupport;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Network;
@@ -18,8 +19,9 @@ namespace TiaMcpServer.Tests.Network;
 public class NetworkStructuredProtocolTests
 {
     [Fact]
-    public async Task NetworkRead_AdvertisesAndReturnsSingleLayerStructuredContract()
+    public async Task ReadEnvelope_IsVersionedAndCanonical()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath("network-roundtrip");
         await using var harness = await McpProtocolTestHarness.StartAsync<NetworkReadTools>();
 
         var tool = Assert.Single(
@@ -43,6 +45,13 @@ public class NetworkStructuredProtocolTests
             });
 
         var structured = AssertOneCanonicalDocument(result);
+        Assert.False(result.IsError);
+        Assert.Equal("1.0", structured.GetProperty("contractVersion").GetString());
+        Assert.Equal(JsonValueKind.Array, structured.GetProperty("warnings").ValueKind);
+        Assert.Equal(JsonValueKind.Null, structured.GetProperty("error").ValueKind);
+        var textDocument = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+        var structuredDocument = CanonicalJson.Serialize(structured);
+        Assert.Equal(textDocument, structuredDocument);
         Assert.Equal(
             JsonValueKind.Object,
             structured.GetProperty("batch")
@@ -51,8 +60,28 @@ public class NetworkStructuredProtocolTests
     }
 
     [Fact]
+    public async Task ReadRejection_HasExplicitNullBatch()
+    {
+        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkReadTools>();
+
+        var result = await harness.Client.CallToolAsync(
+            "network_read",
+            new Dictionary<string, object?> { ["operations"] = Array.Empty<object>() });
+
+        var rejected = AssertOneCanonicalDocument(result);
+        var rejectedIsError = result.IsError == true;
+        Assert.True(rejectedIsError);
+        Assert.Equal(JsonValueKind.Null, rejected.GetProperty("batch").ValueKind);
+        Assert.Equal("1.0", rejected.GetProperty("contractVersion").GetString());
+        Assert.Equal(JsonValueKind.Array, rejected.GetProperty("warnings").ValueKind);
+        Assert.Equal(WorkerFailureCategories.ValidationError,
+            rejected.GetProperty("error").GetProperty("category").GetString());
+    }
+
+    [Fact]
     public async Task NetworkRead_MixesPhase2AndPhase3ReadsInRequestOrder()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath("network-roundtrip");
         await using var harness = await McpProtocolTestHarness.StartAsync<NetworkReadTools>();
 
         var result = await harness.Client.CallToolAsync(
@@ -71,7 +100,7 @@ public class NetworkStructuredProtocolTests
                     {
                         operationId = "phase3-list",
                         operation = "list_network_objects",
-                        projectPath = "list-network-objects-success",
+                        projectPath = "network-roundtrip",
                         objectKinds = new[] { "node" },
                         pageSize = 20,
                     },
@@ -79,7 +108,7 @@ public class NetworkStructuredProtocolTests
                     {
                         operationId = "phase3-inspect",
                         operation = "inspect_network_object",
-                        projectPath = "inspect-network-object-success",
+                        projectPath = "network-roundtrip",
                         target = new { kind = "node", deviceName = "PLC_1", nodeId = "node-1" },
                         attributeNames = new[] { "stringAttribute" },
                     },
@@ -102,7 +131,9 @@ public class NetworkStructuredProtocolTests
     public async Task NetworkWrite_AdvertisesOutputSchemaAndKeepsEnvelopePhasesMutuallyExclusive()
     {
         using var audit = new TempAuditDirectory();
-        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(audit.Path);
+        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(
+            audit.Path,
+            startupProjectPath: "network-roundtrip");
 
         var tool = Assert.Single(
             await harness.Client.ListToolsAsync(),
@@ -117,14 +148,14 @@ public class NetworkStructuredProtocolTests
         var preview = await CallWriteAsync(harness, WriteOperations("network-roundtrip"));
         var previewRoot = AssertOneCanonicalDocument(preview);
         Assert.False(preview.IsError);
-        AssertOnlyPopulated(previewRoot, "preview", "preview");
-        var token = previewRoot.GetProperty("preview").GetProperty("safetyToken").GetString();
+        AssertOnlyPopulated(previewRoot, "preview", "none");
+        Assert.NotEmpty(previewRoot.GetProperty("effects").EnumerateArray());
 
         var applied = await CallWriteAsync(
-            harness, WriteOperations("network-roundtrip"), confirm: true, safetyToken: token);
+            harness, WriteOperations("network-roundtrip"), dryRun: false);
         var appliedRoot = AssertOneCanonicalDocument(applied);
         Assert.False(applied.IsError);
-        AssertOnlyPopulated(appliedRoot, "apply", "batch");
+        AssertOnlyPopulated(appliedRoot, "applied", "batch");
         Assert.True(appliedRoot.GetProperty("success").GetBoolean());
     }
 
@@ -132,21 +163,22 @@ public class NetworkStructuredProtocolTests
     public async Task NetworkWrite_ExecutedBatchWithAFailedItemIsNotAToolError()
     {
         using var audit = new TempAuditDirectory();
-        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(audit.Path);
+        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(
+            audit.Path,
+            startupProjectPath: "network-write-item-failure");
         var operations = WriteOperations("network-write-item-failure");
 
         var preview = AssertOneCanonicalDocument(await CallWriteAsync(harness, operations));
         var applied = await CallWriteAsync(
             harness,
             operations,
-            confirm: true,
-            safetyToken: preview.GetProperty("preview").GetProperty("safetyToken").GetString());
+            dryRun: false);
 
         var root = AssertOneCanonicalDocument(applied);
 
         // The batch ran, so this is a successful MCP call reporting a failed item — not a tool error.
         Assert.False(applied.IsError);
-        AssertOnlyPopulated(root, "apply", "batch");
+        AssertOnlyPopulated(root, "applied", "batch");
         Assert.False(root.GetProperty("success").GetBoolean());
         Assert.Equal("failed", root.GetProperty("batch").GetProperty("operations")[0].GetProperty("status").GetString());
     }
@@ -164,8 +196,10 @@ public class NetworkStructuredProtocolTests
     public async Task NetworkWrite_MultiHomedFlow_ReadSelectPreviewApplyRead_ChangesOnlySelectedPortAndLeavesTheOtherByteForByteUnchanged()
     {
         using var audit = new TempAuditDirectory();
-        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkReadTools, NetworkWriteTools>(audit.Path);
         const string scenario = "multi-homed-network";
+        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkReadTools, NetworkWriteTools>(
+            audit.Path,
+            startupProjectPath: scenario);
 
         var before = await ReadHardwareConfigAsync(harness, scenario);
         var beforePlc = FindNodeByNodeId(before, "node-plc");
@@ -186,15 +220,14 @@ public class NetworkStructuredProtocolTests
         };
 
         var preview = AssertOneCanonicalDocument(await CallWriteAsync(harness, operations));
-        var token = preview.GetProperty("preview").GetProperty("safetyToken").GetString();
 
         // The preview's own resolved target evidence already proves node-plc (not node-db, not a
         // guess) is what was matched, before anything is applied.
-        var previewTarget = preview.GetProperty("preview").GetProperty("target")[0];
+        var previewTarget = preview.GetProperty("effects")[0].GetProperty("effect").GetProperty("target");
         Assert.Equal("node-plc", previewTarget.GetProperty("nodeId").GetString());
         Assert.Equal("PC_1", previewTarget.GetProperty("deviceName").GetString());
 
-        var applied = await CallWriteAsync(harness, operations, confirm: true, safetyToken: token);
+        var applied = await CallWriteAsync(harness, operations, dryRun: false);
         var appliedRoot = AssertOneCanonicalDocument(applied);
         Assert.False(applied.IsError);
         Assert.True(appliedRoot.GetProperty("success").GetBoolean());
@@ -211,50 +244,6 @@ public class NetworkStructuredProtocolTests
         Assert.True(JsonElement.DeepEquals(beforeDb, afterDb));
     }
 
-    /// <summary>
-    /// A caller that reorders JSON keys inside <c>target</c>/<c>changes</c> between preview and
-    /// apply has not changed anything - every value, type, and array order is identical, only pure
-    /// object-property order differs. The safety token binds through canonical (sorted-key)
-    /// hashing, so it must still validate; only a genuinely different value, type, or array order
-    /// may reject it.
-    /// </summary>
-    [Fact]
-    public async Task NetworkWrite_PropertyReorderingOnlyStillValidatesAgainstTheSameToken()
-    {
-        using var audit = new TempAuditDirectory();
-        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(audit.Path);
-
-        var previewOperation = new Dictionary<string, object?>
-        {
-            ["operationId"] = "configure",
-            ["operation"] = "configure_network_device",
-            ["projectPath"] = "network-roundtrip",
-            ["target"] = JsonSerializer.Deserialize<JsonElement>("""{"deviceName":"PLC_1","nodeId":"node-1"}"""),
-            ["changes"] = JsonSerializer.Deserialize<JsonElement>(
-                """{"ipAddress":"192.168.0.10","subnetMask":"255.255.255.0"}"""),
-        };
-        var applyOperation = new Dictionary<string, object?>
-        {
-            ["operationId"] = "configure",
-            ["operation"] = "configure_network_device",
-            ["projectPath"] = "network-roundtrip",
-            ["target"] = JsonSerializer.Deserialize<JsonElement>("""{"nodeId":"node-1","deviceName":"PLC_1"}"""),
-            ["changes"] = JsonSerializer.Deserialize<JsonElement>(
-                """{"subnetMask":"255.255.255.0","ipAddress":"192.168.0.10"}"""),
-        };
-
-        var preview = AssertOneCanonicalDocument(
-            await CallWriteAsync(harness, new object[] { previewOperation }));
-        var token = preview.GetProperty("preview").GetProperty("safetyToken").GetString();
-
-        var applied = await CallWriteAsync(
-            harness, new object[] { applyOperation }, confirm: true, safetyToken: token);
-        var appliedRoot = AssertOneCanonicalDocument(applied);
-
-        Assert.False(applied.IsError);
-        Assert.Equal("apply", appliedRoot.GetProperty("phase").GetString());
-        Assert.True(appliedRoot.GetProperty("success").GetBoolean());
-    }
 
     /// <summary>
     /// A worker success envelope whose payload fails its declared contract must not silently stop a
@@ -263,6 +252,7 @@ public class NetworkStructuredProtocolTests
     [Fact]
     public async Task NetworkRead_InvalidSuccessPayloadBecomesProtocolErrorAndLaterOperationsStillRun()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath("invalid-network-success-payload");
         await using var harness = await McpProtocolTestHarness.StartAsync<NetworkReadTools>();
 
         var result = await harness.Client.CallToolAsync(
@@ -312,7 +302,9 @@ public class NetworkStructuredProtocolTests
     public async Task NetworkWrite_InvalidSuccessPayloadBecomesProtocolErrorSkipsLaterWritesWarnsAndKeepsIsErrorFalse()
     {
         using var audit = new TempAuditDirectory();
-        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(audit.Path);
+        await using var harness = await McpProtocolTestHarness.StartAsync<NetworkWriteTools>(
+            audit.Path,
+            startupProjectPath: "invalid-network-success-payload");
         var operations = new object[]
         {
             new
@@ -334,9 +326,8 @@ public class NetworkStructuredProtocolTests
         };
 
         var preview = AssertOneCanonicalDocument(await CallWriteAsync(harness, operations));
-        var token = preview.GetProperty("preview").GetProperty("safetyToken").GetString();
 
-        var applied = await CallWriteAsync(harness, operations, confirm: true, safetyToken: token);
+        var applied = await CallWriteAsync(harness, operations, dryRun: false);
         var root = AssertOneCanonicalDocument(applied);
 
         // The batch RAN (a usable batch exists), so this stays a successful MCP call even though
@@ -359,7 +350,7 @@ public class NetworkStructuredProtocolTests
 
         var warning = items[0].GetProperty("warnings")[0].GetString();
         Assert.Contains("may already have changed", warning);
-        Assert.Contains("no batch-wide rollback", warning, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no rollback", warning, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -410,7 +401,7 @@ public class NetworkStructuredProtocolTests
     /// Malformed nested input has to be refused where an agent actually sends it — through
     /// <c>tools/call</c> — not merely where a test can construct the CLR type. A member that is
     /// silently dropped here would turn "connect this subnet" into "change only the IP address"
-    /// and still hand back a safety token, so the assertion is that nothing was previewed.
+    /// and still return a preview, so the assertion is that nothing was previewed.
     /// </summary>
     [Theory]
     // An unknown nested member must be refused rather than silently dropped...
@@ -440,26 +431,19 @@ public class NetworkStructuredProtocolTests
         var result = await CallWriteAsync(harness, new object[] { operation });
 
         Assert.True(result.IsError);
-        var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
-        Assert.DoesNotContain("safetyToken", text, StringComparison.Ordinal);
     }
 
     private static ValueTask<CallToolResult> CallWriteAsync(
         McpProtocolTestHarness harness,
         object operations,
-        bool confirm = false,
-        string? safetyToken = null)
+        bool dryRun = true)
     {
         var arguments = new Dictionary<string, object?>
         {
             ["operations"] = operations,
-            ["confirm"] = confirm,
+            ["dryRun"] = dryRun,
         };
 
-        if (safetyToken is not null)
-        {
-            arguments["safetyToken"] = safetyToken;
-        }
 
         return harness.Client.CallToolAsync("network_write", arguments);
     }
@@ -502,7 +486,7 @@ public class NetworkStructuredProtocolTests
             operation = "add_network_device",
             projectPath,
             typeIdentifier = "OrderNumber:TEST",
-            deviceName = "PLC_1"
+            deviceName = "AddedPLC"
         },
         new
         {
@@ -519,7 +503,7 @@ public class NetworkStructuredProtocolTests
     private static void AssertOnlyPopulated(JsonElement root, string phase, string populated)
     {
         Assert.Equal(phase, root.GetProperty("phase").GetString());
-        foreach (var member in new[] { "preview", "batch", "error" })
+        foreach (var member in new[] { "batch", "error" })
         {
             Assert.Equal(
                 member == populated ? JsonValueKind.Object : JsonValueKind.Null,

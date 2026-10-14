@@ -1,15 +1,18 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Server;
-using TiaMcpServer.Batch;
 using TiaMcpServer.Cli;
 using TiaMcpServer.Cli.Install;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Cursors;
 using TiaMcpServer.Network;
+using TiaMcpServer.ProjectTree;
+using TiaMcpServer.ProjectLifecycle;
 using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
 using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Safety;
 
 namespace TiaMcpServer
 {
@@ -33,6 +36,12 @@ namespace TiaMcpServer
                 return VersionCommand.Run(Console.Out);
             }
 
+            if (RemovedCliOptions.TryGetError(args, out var removedOptionError))
+            {
+                Console.Error.WriteLine($"Error: {removedOptionError}");
+                return 1;
+            }
+
             var accessModeResult = AccessModeParser.Parse(args);
             if (!accessModeResult.IsValid)
             {
@@ -42,66 +51,122 @@ namespace TiaMcpServer
 
             var accessMode = accessModeResult.Mode;
             var accessPolicy = new OperationAccessPolicy(accessMode);
+            if (!TryResolveStartupProjectPath(args, out var startupProjectPath, out var projectPathError))
+            {
+                Console.Error.WriteLine($"Error: {projectPathError}");
+                return 1;
+            }
 
-            Console.Error.WriteLine($"TIA MCP access mode: {accessMode.ToString().ToUpperInvariant()}");
+            Console.Error.WriteLine($"TIA MCP access mode: {McpAccessModeNames.ToName(accessMode).ToUpperInvariant()}");
             if (accessMode == McpAccessMode.ReadOnly)
             {
                 Console.Error.WriteLine("Project opening, compilation, writes, lifecycle operations, and PLC control are disabled.");
             }
 
-            // Application-specific access-mode switches have already been parsed. Remove them
+            // Application-specific access-mode switches have been parsed. Remove them
             // before generic-host configuration processes the remaining command line because
             // value-less switches such as --read-only are not valid configuration key/value pairs.
             var builder = Host.CreateApplicationBuilder(
                 HostArgumentFilter.RemoveAccessModeArguments(args));
             builder.Logging.AddConsole(opts => opts.LogToStandardErrorThreshold = LogLevel.Trace);
-            builder.Services.AddSingleton(new ProjectSessionBinding(ResolveStartupProjectPath(args)));
-            builder.Services.AddSingleton(new WriteSafetyService());
+            builder.Services.AddSingleton(new ProjectSessionBinding(startupProjectPath));
             builder.Services.AddSingleton(accessPolicy);
             builder.Services.AddSingleton(sp => new OpennessWorkerClient(
                 sp.GetRequiredService<ProjectSessionBinding>(),
                 sp.GetRequiredService<ILogger<OpennessWorkerClient>>(),
                 accessPolicy: sp.GetRequiredService<OperationAccessPolicy>()));
+            builder.Services.AddSingleton(sp => new WriteExecution(
+                new OpennessWriteBindingGate(sp.GetRequiredService<OpennessWorkerClient>()),
+                new JsonlWriteAuditSink(), WriteGuardRegistration.ProductionCatalog(), TimeProvider.System));
+            builder.Services.AddSingleton(_ => AuthenticatedCursorProtector.CreateProcessScoped());
+            builder.Services.AddSingleton(sp => new HardwarePageCursorCodec(
+                sp.GetRequiredService<AuthenticatedCursorProtector>()));
+            builder.Services.AddSingleton(sp => new HardwarePageProjector(
+                sp.GetRequiredService<HardwarePageCursorCodec>()));
+            builder.Services.AddSingleton(sp => new HardwarePaginationCoordinator(
+                sp.GetRequiredService<OpennessWorkerClient>(),
+                sp.GetRequiredService<HardwarePageCursorCodec>(),
+                sp.GetRequiredService<HardwarePageProjector>()));
+            builder.Services.AddSingleton(sp => new ProjectTreeCursorCodec(
+                sp.GetRequiredService<AuthenticatedCursorProtector>()));
+            builder.Services.AddSingleton(sp => new ProjectTreeSnapshotStore(TimeProvider.System));
+            builder.Services.AddSingleton(sp => new ProjectTreePageProjector(
+                sp.GetRequiredService<ProjectTreeCursorCodec>()));
+            builder.Services.AddSingleton(sp => new ProjectTreeBrowseCoordinator(
+                sp.GetRequiredService<OpennessWorkerClient>(),
+                sp.GetRequiredService<ProjectTreeCursorCodec>(),
+                sp.GetRequiredService<ProjectTreeSnapshotStore>(),
+                sp.GetRequiredService<ProjectTreePageProjector>(),
+                TimeProvider.System));
+            builder.Services.AddSingleton(sp => new NetworkReadOperationExecutor(
+                sp.GetRequiredService<OpennessWorkerClient>(),
+                sp.GetRequiredService<HardwarePaginationCoordinator>()));
 
-            var mcp = builder.Services
+            builder.Services
                 .AddMcpServer()
                 .WithStdioServerTransport()
-                .WithTools<ProjectReadTools>()
-                .WithTools<ReadBatchTools>()
-                .WithTools<NetworkReadTools>()
-                .WithTools<OpcUaReadTools>();
+                .WithAccessModeTools(accessMode);
 
-            if (accessMode == McpAccessMode.ReadWrite)
-            {
-                mcp.WithTools<ProjectEngineeringTools>()
-                   .WithTools<ProjectWriteTools>()
-                   .WithTools<WriteBatchTools>()
-                   .WithTools<NetworkWriteTools>()
-                   .WithTools<OpcUaWriteTools>();
-            }
-
-            await builder.Build().RunAsync();
+            using var host = builder.Build();
+            NetworkReadTools.RegisterExecutor(
+                host.Services.GetRequiredService<OpennessWorkerClient>(),
+                host.Services.GetRequiredService<NetworkReadOperationExecutor>());
+            await host.RunAsync();
             return 0;
         }
 
-        private static string? ResolveStartupProjectPath(string[] args)
+        private static bool TryResolveStartupProjectPath(
+            string[] args,
+            out string? projectPath,
+            out string? error)
         {
+            projectPath = null;
+            error = null;
             for (int i = 0; i < args.Length; i++)
             {
-                if (string.Equals(args[i], "--project", StringComparison.OrdinalIgnoreCase) &&
-                    i + 1 < args.Length)
+                string? candidate = null;
+                if (string.Equals(args[i], "--project", StringComparison.OrdinalIgnoreCase))
                 {
-                    return args[i + 1];
+                    if (i + 1 >= args.Length ||
+                        string.IsNullOrWhiteSpace(args[i + 1]) ||
+                        args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    {
+                        error = "--project requires a value.";
+                        return false;
+                    }
+
+                    candidate = args[++i];
+                }
+                else
+                {
+                    const string projectPrefix = "--project=";
+                    if (args[i].StartsWith(projectPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        candidate = args[i].Substring(projectPrefix.Length);
+                        if (string.IsNullOrWhiteSpace(candidate))
+                        {
+                            error = "--project requires a value.";
+                            return false;
+                        }
+                    }
                 }
 
-                const string projectPrefix = "--project=";
-                if (args[i].StartsWith(projectPrefix, StringComparison.OrdinalIgnoreCase))
+                if (candidate is null)
                 {
-                    return args[i].Substring(projectPrefix.Length);
+                    continue;
                 }
+
+                if (projectPath is not null)
+                {
+                    error = "--project may be specified only once.";
+                    return false;
+                }
+
+                projectPath = candidate;
             }
 
-            return Environment.GetEnvironmentVariable("TIA_MCP_PROJECT_PATH");
+            projectPath ??= Environment.GetEnvironmentVariable("TIA_MCP_PROJECT_PATH");
+            return true;
         }
     }
 }

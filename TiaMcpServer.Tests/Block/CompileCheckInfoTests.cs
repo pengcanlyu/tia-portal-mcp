@@ -1,18 +1,14 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Block;
+using TiaMcpServer.Contracts.Json;
+using TiaMcpServer.Contracts.Plc;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Block;
 
 public class CompileCheckInfoTests
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    private static readonly JsonSerializerOptions JsonOptions = WorkerJson.PayloadOptionsFor(typeof(CompileCheckReport));
 
     [Fact]
     public void EmptyReportSerializesWithDefaultValues()
@@ -104,6 +100,31 @@ public class CompileCheckInfoTests
         Assert.Equal("block", roundTripped.Scope);
         Assert.Equal("PLC_1/Blocks/Main", roundTripped.BlockPath);
         Assert.Equal("Success", roundTripped.OverallState);
+    }
+
+    [Fact]
+    public void DeviceIdentitySurvivesJsonRoundTrip()
+    {
+        const string json = "{\"plcName\":\"PLC_DP\",\"deviceName\":\"Station_1\",\"state\":\"Success\"}";
+        var plc = JsonSerializer.Deserialize<PlcCompileInfo>(json, JsonOptions)!;
+
+        using var roundTripped = JsonDocument.Parse(JsonSerializer.Serialize(plc, JsonOptions));
+
+        Assert.Equal("PLC_DP", roundTripped.RootElement.GetProperty("plcName").GetString());
+        Assert.True(roundTripped.RootElement.TryGetProperty("deviceName", out var deviceName));
+        Assert.Equal("Station_1", deviceName.GetString());
+    }
+
+    [Fact]
+    public void LegacyJsonRetainsUnknownDeviceIdentityAsExplicitNull()
+    {
+        var plc = JsonSerializer.Deserialize<PlcCompileInfo>("{\"plcName\":\"Legacy_PLC\"}", JsonOptions)!;
+
+        using var roundTripped = JsonDocument.Parse(JsonSerializer.Serialize(plc, JsonOptions));
+
+        Assert.Equal("Legacy_PLC", plc.PlcName);
+        Assert.Null(plc.DeviceName);
+        Assert.Equal(JsonValueKind.Null, roundTripped.RootElement.GetProperty("deviceName").ValueKind);
     }
 
     private static CompileCheckReport RoundTrip(CompileCheckReport report)

@@ -1,6 +1,4 @@
-using System;
-using System.Linq;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Network;
 using TiaMcpServer.Network;
 using Xunit;
 
@@ -366,6 +364,20 @@ public class NetworkSubnetLifecycleRequestContractTests
 
         Assert.False(result.IsValid);
         Assert.Contains("kind", result.Error);
+    }
+
+    [Theory]
+    [InlineData("update_subnet")]
+    [InlineData("delete_subnet")]
+    public void ValidateWrite_RejectsMissingKindTarget(string operationName)
+    {
+        var result = Validate(TargetedSubnetOp(
+            operationName,
+            target: new NetworkObjectTarget { SubnetId = "subnet-eth-1" }));
+
+        Assert.False(result.IsValid);
+        Assert.Contains("'target.kind'", result.Error);
+        Assert.Contains("'subnet'", result.Error);
     }
 
     [Theory]

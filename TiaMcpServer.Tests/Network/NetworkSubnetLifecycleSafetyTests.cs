@@ -1,4 +1,5 @@
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Network;
+using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Network;
 using Xunit;
 
@@ -137,11 +138,11 @@ public class NetworkSubnetLifecycleSafetyTests
         var resolution = NetworkIdentityResolver.Resolve(operation, state);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.TargetNotFound, resolution.FailureCategory);
     }
 
     [Fact]
-    public void Resolve_UpdateSubnet_ZeroMatches_FailsPostconditionFailed()
+    public void Resolve_UpdateSubnet_ZeroMatches_FailsTargetNotFound()
     {
         var state = State(Subnet("LINE_1", "S-1"));
         var operation = UpdateSubnetRequest("op1", "S-404", new NetworkSubnetChanges { Name = "X" });
@@ -149,11 +150,11 @@ public class NetworkSubnetLifecycleSafetyTests
         var resolution = NetworkIdentityResolver.Resolve(operation, state);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.TargetNotFound, resolution.FailureCategory);
     }
 
     [Fact]
-    public void Resolve_UpdateSubnet_DuplicateIds_FailsPostconditionFailed()
+    public void Resolve_UpdateSubnet_DuplicateIds_FailsTargetAmbiguous()
     {
         var state = State(Subnet("LINE_1", "S-DUP"), Subnet("LINE_2", "S-DUP"));
         var operation = UpdateSubnetRequest("op1", "S-DUP", new NetworkSubnetChanges { Name = "X" });
@@ -161,11 +162,11 @@ public class NetworkSubnetLifecycleSafetyTests
         var resolution = NetworkIdentityResolver.Resolve(operation, state);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.TargetAmbiguous, resolution.FailureCategory);
     }
 
     [Fact]
-    public void Resolve_UpdateSubnet_BlankNetworkType_FailsPostconditionFailed()
+    public void Resolve_UpdateSubnet_BlankNetworkType_FailsTargetKindUnsupported()
     {
         var state = State(Subnet("LINE_1", "S-1", networkType: null));
         var operation = UpdateSubnetRequest("op1", "S-1", new NetworkSubnetChanges { Name = "X" });
@@ -173,11 +174,11 @@ public class NetworkSubnetLifecycleSafetyTests
         var resolution = NetworkIdentityResolver.Resolve(operation, state);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.TargetKindUnsupported, resolution.FailureCategory);
     }
 
     [Fact]
-    public void Resolve_UpdateSubnet_UnsupportedNetworkType_FailsPostconditionFailed()
+    public void Resolve_UpdateSubnet_UnsupportedNetworkType_FailsTargetKindUnsupported()
     {
         var state = State(Subnet("LINE_1", "S-1", networkType: "Bluetooth"));
         var operation = UpdateSubnetRequest("op1", "S-1", new NetworkSubnetChanges { Name = "X" });
@@ -185,7 +186,7 @@ public class NetworkSubnetLifecycleSafetyTests
         var resolution = NetworkIdentityResolver.Resolve(operation, state);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.TargetKindUnsupported, resolution.FailureCategory);
     }
 
     [Fact]
@@ -262,14 +263,14 @@ public class NetworkSubnetLifecycleSafetyTests
     }
 
     [Fact]
-    public void Resolve_UpdateSubnet_NoStateAvailable_FailsPostconditionFailed()
+    public void Resolve_UpdateSubnet_NoStateAvailable_FailsWorkerOperationFailed()
     {
         var operation = UpdateSubnetRequest("op1", "S-1", new NetworkSubnetChanges { Name = "X" });
 
         var resolution = NetworkIdentityResolver.Resolve(operation, state: null);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.WorkerOperationFailed, resolution.FailureCategory);
     }
 
     // ---- delete_subnet: exact ordinal subnetId match, no dependency inventory -----------------
@@ -298,11 +299,11 @@ public class NetworkSubnetLifecycleSafetyTests
         var resolution = NetworkIdentityResolver.Resolve(operation, state);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.TargetNotFound, resolution.FailureCategory);
     }
 
     [Fact]
-    public void Resolve_DeleteSubnet_ZeroMatches_FailsPostconditionFailed()
+    public void Resolve_DeleteSubnet_ZeroMatches_FailsTargetNotFound()
     {
         var state = State(Subnet("LINE_1", "S-1"));
         var operation = DeleteSubnetRequest("op1", "S-404");
@@ -310,11 +311,11 @@ public class NetworkSubnetLifecycleSafetyTests
         var resolution = NetworkIdentityResolver.Resolve(operation, state);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.TargetNotFound, resolution.FailureCategory);
     }
 
     [Fact]
-    public void Resolve_DeleteSubnet_DuplicateIds_FailsPostconditionFailed()
+    public void Resolve_DeleteSubnet_DuplicateIds_FailsTargetAmbiguous()
     {
         var state = State(Subnet("LINE_1", "S-DUP"), Subnet("LINE_2", "S-DUP"));
         var operation = DeleteSubnetRequest("op1", "S-DUP");
@@ -322,7 +323,7 @@ public class NetworkSubnetLifecycleSafetyTests
         var resolution = NetworkIdentityResolver.Resolve(operation, state);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.TargetAmbiguous, resolution.FailureCategory);
     }
 
     [Fact]
@@ -346,13 +347,13 @@ public class NetworkSubnetLifecycleSafetyTests
     }
 
     [Fact]
-    public void Resolve_DeleteSubnet_NoStateAvailable_FailsPostconditionFailed()
+    public void Resolve_DeleteSubnet_NoStateAvailable_FailsWorkerOperationFailed()
     {
         var operation = DeleteSubnetRequest("op1", "S-1");
 
         var resolution = NetworkIdentityResolver.Resolve(operation, state: null);
 
         Assert.False(resolution.Success);
-        Assert.Equal(WorkerFailureCategories.PostconditionFailed, resolution.FailureCategory);
+        Assert.Equal(WorkerFailureCategories.WorkerOperationFailed, resolution.FailureCategory);
     }
 }

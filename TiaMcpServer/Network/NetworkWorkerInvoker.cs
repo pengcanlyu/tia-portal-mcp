@@ -1,5 +1,6 @@
-using TiaMcpServer.Contracts;
 using TiaMcpServer.Worker;
+using TiaMcpServer.Contracts.Network;
+using TiaMcpServer.Contracts.Worker;
 
 namespace TiaMcpServer.Network;
 
@@ -8,9 +9,14 @@ public static class NetworkWorkerInvoker
 {
     public static Task<WorkerCallResult> InvokeReadAsync(
         OpennessWorkerClient client,
-        NetworkOperationRequest operation) => operation.Operation switch
+        NetworkOperationRequest operation)         => operation.Operation switch
         {
-            "read_hardware_config" => client.ReadHardwareConfigAsync(operation.ProjectPath),
+            "read_hardware_config" => client.ReadHardwareConfigAsync(
+                operation.ProjectPath,
+                operation.DeviceName,
+                operation.PlcName,
+                operation.IncludeIoDetails ?? false,
+                operation.IncludeTagMatches ?? false),
             "search_equipment_catalog" => client.SearchEquipmentCatalogAsync(
                 operation.Query!, operation.ProjectPath, operation.MaxResults),
             "list_network_objects" => client.ListNetworkObjectsAsync(
@@ -38,6 +44,13 @@ public static class NetworkWorkerInvoker
         {
             Kind = target.Kind,
             DeviceName = target.DeviceName,
+            InterfacePath = target.InterfacePath?.Select(segment => new NetworkInterfacePathSegmentInfo
+            {
+                Name = segment.Name,
+                PositionNumber = segment.PositionNumber ?? throw new InvalidOperationException(
+                    "Validated network interface owner segment is missing positionNumber."),
+                TypeIdentifier = segment.TypeIdentifier,
+            }).ToList(),
             ItemPath = target.ItemPath is null
                 ? null
                 : target.ItemPath
@@ -82,11 +95,11 @@ public static class NetworkWorkerInvoker
                 operation.DeviceItemName ?? operation.DeviceName!,
                 projectPath),
             "configure_network_device" => client.ConfigureNetworkDeviceAsync(
-                operation.Target!.DeviceName!,
-                operation.Target!.NodeId!,
+                MapSelector(operation.Target!),
                 operation.Changes!.IpAddress,
                 operation.Changes!.SubnetMask,
                 operation.Changes!.PnDeviceName,
+                operation.Changes!.PnDeviceNameAutoGeneration,
                 operation.Changes!.Subnet?.SubnetId,
                 operation.Changes!.IoSystem?.SubnetId,
                 operation.Changes!.IoSystem?.Number,

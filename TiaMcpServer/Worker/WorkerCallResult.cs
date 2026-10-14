@@ -1,8 +1,17 @@
 using System.Text.Json;
-using TiaMcpServer.Contracts;
 using TiaMcpServer.Json;
+using TiaMcpServer.Contracts.Block;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Worker;
 
 namespace TiaMcpServer.Worker;
+
+internal enum WorkerDispatchState
+{
+    NotSent,
+    Sent,
+    Unknown
+}
 
 /// <summary>
 /// Structured outcome of one TIA Openness worker invocation. Replaces the "Error:"
@@ -24,6 +33,21 @@ public sealed record WorkerCallResult(
     /// binding — see ProjectSessionBinding.
     /// </summary>
     public string? ResolvedProjectPath { get; init; }
+
+    /// <summary>Complete worker/Portal/project identity observed for this response.</summary>
+    public WorkerSessionIdentity? SessionIdentity { get; init; }
+
+    /// <summary>Actual Portal attachment reported by the worker, including without a selected project.</summary>
+    public int? PortalProcessId { get; init; }
+
+    /// <summary>Typed update_block_logic evidence; absent for unrelated calls.</summary>
+    public BlockImportOutcomeInfo? BlockImportOutcome { get; init; }
+
+    /// <summary>Host-observed request dispatch provenance; never serialized to callers.</summary>
+    internal WorkerDispatchState DispatchState { get; init; } = WorkerDispatchState.Unknown;
+
+    /// <summary>The worker returned success before host identity validation rejected its response.</summary>
+    internal bool IsPostOperationFailure { get; init; }
 
     public static WorkerCallResult Ok(string payload, IReadOnlyList<string>? warnings = null)
         => new(true, payload, null, null, warnings ?? Array.Empty<string>());
@@ -54,7 +78,7 @@ public sealed record WorkerCallResult(
 
     /// <summary>
     /// Structured agent-facing envelope for direct lifecycle results (as opposed to guarded
-    /// writes, which render through <c>WriteSafetyTooling.BuildApplyResult</c>). Always emits
+    /// writes, which render through the guarded write pipeline). Always emits
     /// <c>success</c>, <c>payload</c>, <c>failureCategory</c>, <c>error</c>, and <c>warnings</c> so
     /// the category is a first-class, independently readable field rather than text embedded in
     /// a message string.
@@ -67,7 +91,8 @@ public sealed record WorkerCallResult(
                 payload = Payload,
                 failureCategory = FailureCategory,
                 error = Error,
-                warnings = Warnings
+                warnings = Warnings,
+                sessionIdentity = SessionIdentity
             },
             TiaJson.Presentation);
 }

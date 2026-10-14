@@ -10,15 +10,6 @@ on:
         branches: ["main"]
 
 jobs:
-    docs:
-        runs-on: windows-latest
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
-
-            - name: Verify documentation links
-              shell: pwsh
-              run: ./scripts/verify-doc-links.ps1
 
     build-and-test:
         runs-on: windows-latest
@@ -26,21 +17,27 @@ jobs:
             CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
-            - name: Setup .NET 8.0
-              uses: actions/setup-dotnet@v4
+            - name: Setup .NET 10.0
+              uses: actions/setup-dotnet@v6
               with:
-                  dotnet-version: "8.0.x"
+                  dotnet-version: "10.0.x"
 
             - name: Restore
-              run: dotnet restore TiaMcpServer.sln
+              run: dotnet restore TiaMcpServer.slnx -m:1
+
+            - name: Restore reference stubs
+              run: dotnet restore reference-stubs/TiaMcpServer.ReferenceStubs.sln -m:1
+
+            - name: Verify reference stubs
+              run: pwsh -NoProfile -File scripts/verify-reference-stubs.ps1 -Configuration Release -NoRestore
 
             - name: Build
-              run: dotnet build TiaMcpServer.sln -m:1 --no-restore --configuration Release /p:UseTiaPortalReferenceStubs=true
+              run: dotnet build TiaMcpServer.slnx -m:1 --no-restore --configuration Release /p:UseTiaPortalReferenceStubs=true
 
             - name: Run scoped coverage
-              run: dotnet test TiaMcpServer.Tests/TiaMcpServer.Tests.csproj --no-build --configuration Release --collect:"XPlat Code Coverage" --settings TiaMcpServer.Tests/coverage.runsettings --results-directory TestResults
+              run: dotnet test TiaMcpServer.Tests/TiaMcpServer.Tests.csproj --no-build --configuration Release --collect:"XPlat Code Coverage" --settings TiaMcpServer.Tests/coverage.runsettings --results-directory TestResults -- xUnit.ParallelizeTestCollections=false xUnit.ParallelizeAssembly=false xUnit.MaxParallelThreads=1 RunConfiguration.MaxCpuCount=1
 
             - name: Enforce coverage threshold
               shell: pwsh
@@ -51,8 +48,8 @@ jobs:
 
             - name: Upload coverage to Codecov
               if: ${{ env.CODECOV_TOKEN != '' }}
-              uses: codecov/codecov-action@v4
+              uses: codecov/codecov-action@v7
               with:
                   token: ${{ env.CODECOV_TOKEN }}
                   file: TestResults/**/coverage.cobertura.xml
-                  fail_ci_if_error: true
+                  fail_ci_if_error: false

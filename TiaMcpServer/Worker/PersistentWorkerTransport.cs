@@ -4,7 +4,8 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Json;
+using TiaMcpServer.Contracts.Worker;
 
 namespace TiaMcpServer.Worker;
 
@@ -18,12 +19,6 @@ namespace TiaMcpServer.Worker;
 /// </summary>
 public sealed class PersistentWorkerTransport : IDisposable
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true
-    };
-
     private const int RecentStderrCapacity = 30;
 
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -35,6 +30,7 @@ public sealed class PersistentWorkerTransport : IDisposable
 
     private Process? _process;
     private Task? _stderrPump;
+    private bool _handshakeComplete;
     private bool _disposed;
 
     public PersistentWorkerTransport(string workerExecutablePath, TimeSpan requestTimeout, ILogger? logger = null, string? workerArgs = null)
@@ -52,65 +48,119 @@ public sealed class PersistentWorkerTransport : IDisposable
         {
             EnsureProcessStarted();
             var process = _process!;
-
-            try
+            if (!_handshakeComplete)
             {
-                await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions))
-                    .ConfigureAwait(false);
-                await process.StandardInput.FlushAsync().ConfigureAwait(false);
-            }
-            catch (IOException)
-            {
-                // Broken pipe: the worker died since the last request. Fail this request;
-                // the next one restarts the process.
-                KillProcess();
-                throw;
+                var hello = await ExchangeAsync(
+                    process,
+                    new WorkerRequest
+                    {
+                        Method = "hello",
+                        ProtocolVersion = WorkerProtocol.Version
+                    }).ConfigureAwait(false);
+                ValidateHello(hello);
+                _handshakeComplete = true;
             }
 
-            var responseLineTask = process.StandardOutput.ReadLineAsync();
-            using var timeout = new CancellationTokenSource(_requestTimeout);
-            var completed = await Task.WhenAny(responseLineTask, Task.Delay(Timeout.InfiniteTimeSpan, timeout.Token))
-                .ConfigureAwait(false);
-
-            if (completed != responseLineTask)
-            {
-                KillProcess();
-                throw new TimeoutException(
-                    $"TIA Openness worker did not respond within {_requestTimeout.TotalSeconds:N0} seconds. "
-                    + "The worker process was terminated and will restart on the next request; retry it.");
-            }
-
-            var responseLine = await responseLineTask.ConfigureAwait(false);
-            if (responseLine is null)
-            {
-                var detail = await CaptureCrashDetailAsync().ConfigureAwait(false);
-                throw new InvalidOperationException($"TIA Openness worker exited without a response. {detail}");
-            }
-
-            WorkerResponse? response;
-            try
-            {
-                response = JsonSerializer.Deserialize<WorkerResponse>(responseLine, JsonOptions);
-            }
-            catch (JsonException)
-            {
-                // Protocol desync: any leftover bytes would corrupt the next request too.
-                KillProcess();
-                throw;
-            }
-
-            if (response is null)
-            {
-                // A JSON null is just as invalid as malformed protocol data; do not reuse it.
-                KillProcess();
-                throw new InvalidOperationException("TIA Openness worker returned an empty response.");
-            }
-
-            return response;
+            request.ProtocolVersion = WorkerProtocol.Version;
+            return await ExchangeAsync(process, request).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    private async Task<WorkerResponse> ExchangeAsync(Process process, WorkerRequest request)
+    {
+        try
+        {
+            await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(request, WorkerJson.Request))
+                .ConfigureAwait(false);
+            await process.StandardInput.FlushAsync().ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            // Broken pipe: the worker died since the last request. Fail this request;
+            // the next one restarts the process.
+            KillProcess();
+            throw;
+        }
+
+        var responseLineTask = process.StandardOutput.ReadLineAsync();
+        using var timeout = new CancellationTokenSource(_requestTimeout);
+        var completed = await Task.WhenAny(responseLineTask, Task.Delay(Timeout.InfiniteTimeSpan, timeout.Token))
+            .ConfigureAwait(false);
+
+        if (completed != responseLineTask)
+        {
+            KillProcess();
+            throw new TimeoutException(
+                $"TIA Openness worker did not respond within {_requestTimeout.TotalSeconds:N0} seconds. "
+                + "The worker process was terminated and will restart on the next request; retry it.");
+        }
+
+        var responseLine = await responseLineTask.ConfigureAwait(false);
+        if (responseLine is null)
+        {
+            var detail = await CaptureCrashDetailAsync().ConfigureAwait(false);
+            throw new InvalidOperationException($"TIA Openness worker exited without a response. {detail}");
+        }
+
+        WorkerResponse? response;
+        try
+        {
+            response = JsonSerializer.Deserialize<WorkerResponse>(responseLine, WorkerJson.Envelope);
+        }
+        catch (JsonException)
+        {
+            // Protocol desync: any leftover bytes would corrupt the next request too.
+            KillProcess();
+            throw;
+        }
+
+        if (response is null)
+        {
+            KillProcess();
+            throw new InvalidOperationException("TIA Openness worker returned an empty response.");
+        }
+
+        try
+        {
+            ProjectContextPayloadContract.ValidateEnvelopeIdentity(responseLine, response);
+        }
+        catch (JsonException)
+        {
+            // A completed response with malformed local identity is a post-send protocol
+            // failure. Keep the worker available for explicit state inspection; never replay.
+            return new WorkerResponse
+            {
+                Success = false,
+                FailureCategory = WorkerFailureCategories.ProtocolError,
+                Error = "The worker local-session identity did not match its declared contract. Inspect current state before retrying."
+            };
+        }
+
+        return response;
+    }
+
+    private void ValidateHello(WorkerResponse response)
+    {
+        var capabilities = response.Capabilities ?? new List<string>();
+        var missing = WorkerProtocol.RequiredCapabilities
+            .Where(required => !capabilities.Contains(required, StringComparer.Ordinal))
+            .ToArray();
+        if (!response.Success ||
+            !string.Equals(response.ProtocolVersion, WorkerProtocol.Version, StringComparison.Ordinal) ||
+            missing.Length != 0)
+        {
+            var message =
+                "TIA Openness worker protocol handshake failed before any Siemens operation. "
+                + $"Expected version '{WorkerProtocol.Version}' and capabilities "
+                + $"[{string.Join(", ", WorkerProtocol.RequiredCapabilities)}]; received version "
+                + $"'{response.ProtocolVersion ?? "(missing)"}', missing [{string.Join(", ", missing)}]. "
+                + $"Worker error: {response.Error ?? "(none)"}";
+            KillProcess();
+            throw new WorkerProtocolMismatchException(message);
         }
     }
 
@@ -193,6 +243,7 @@ public sealed class PersistentWorkerTransport : IDisposable
         var process = _process;
         _process = null;
         _stderrPump = null;
+        _handshakeComplete = false;
         if (process is null)
         {
             return;
@@ -247,5 +298,13 @@ public sealed class PersistentWorkerTransport : IDisposable
         }
 
         _gate.Dispose();
+    }
+
+    public sealed class WorkerProtocolMismatchException : InvalidOperationException
+    {
+        public WorkerProtocolMismatchException(string message)
+            : base(message)
+        {
+        }
     }
 }

@@ -1,7 +1,7 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using TiaMcpServer.Contracts;
-using TiaMcpServer.Safety;
+using TiaMcpServer.Contracts.Json;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Tests.TestSupport;
 using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
 using Xunit;
@@ -10,19 +10,14 @@ namespace TiaMcpServer.Tests.Project;
 
 /// <summary>
 /// Contract tests for the extended project-metadata surface of <c>get_project_status</c>: the
-/// additive <see cref="ProjectStatusInfo.Metadata"/> schema, backward compatibility of payloads
-/// produced before metadata existed, worker source-contract invariants for
-/// <c>ProjectMetadataReader</c>, and the full metadata round trip over the real IPC pipe via the
+/// <see cref="ProjectStatusInfo.Metadata"/> sections, explicit unknown values, and the full
+/// metadata round trip over the real IPC pipe via the
 /// FakeWorker's <c>status-with-metadata</c> scenario.
 /// </summary>
+[Collection(RealWorkerProcessCollection.Name)]
 public class ProjectMetadataTests
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    private static readonly JsonSerializerOptions JsonOptions = WorkerJson.PayloadOptionsFor(typeof(ProjectLifecycleResultInfo));
 
     private static OpennessWorkerClient CreateClient(string workerPath)
         => new(
@@ -30,15 +25,11 @@ public class ProjectMetadataTests
             logger: null,
             workerExecutablePath: workerPath);
 
-    private static JsonElement PayloadFromEnvelope(string response)
-    {
-        using var envelope = JsonDocument.Parse(response);
-        using var payload = JsonDocument.Parse(envelope.RootElement.GetProperty("payload").GetString()!);
-        return payload.RootElement.Clone();
-    }
+    private static JsonElement PayloadFromEnvelope(ModelContextProtocol.Protocol.CallToolResult response)
+        => StandaloneStatusToolTests.Document(response).GetProperty("result").GetProperty("value");
 
     [Fact]
-    public void StatusWithoutMetadata_SerializesIdenticallyToPreMetadataPayload()
+    public void StatusWithoutMetadata_WritesUnknownValuesAsExplicitNull()
     {
         var status = new ProjectStatusInfo
         {
@@ -51,11 +42,15 @@ public class ProjectMetadataTests
 
         var json = JsonSerializer.Serialize(status, JsonOptions);
 
-        // No metadata member is emitted when none is set - the payload is byte-for-byte the
-        // pre-metadata schema, so existing consumers keep parsing unchanged responses.
-        Assert.DoesNotContain("metadata", json, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("\"isOpen\":true", json);
-        Assert.Contains("\"name\":\"Ground\"", json);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("metadata").ValueKind);
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("isModified").ValueKind);
+        Assert.True(root.GetProperty("isOpen").GetBoolean());
+        Assert.Equal("Ground", root.GetProperty("name").GetString());
+        Assert.Equal(status.Path, root.GetProperty("path").GetString());
+        Assert.Equal("V21", root.GetProperty("version").GetString());
+        Assert.Equal("TiaBot", root.GetProperty("author").GetString());
     }
 
     [Fact]
@@ -122,12 +117,12 @@ public class ProjectMetadataTests
 
         var compilation = meta.GetProperty("compilationSettings");
         Assert.True(compilation.GetProperty("isSimulationDuringBlockCompilationEnabled").GetBoolean());
-        // Null from an unavailable service must be omitted, never written as false.
-        Assert.False(compilation.TryGetProperty("isVirtualPlcDuringBlockCompilationEnabled", out _));
+        // An unavailable service is explicitly unknown, never reported as false.
+        Assert.Equal(JsonValueKind.Null, compilation.GetProperty("isVirtualPlcDuringBlockCompilationEnabled").ValueKind);
     }
 
     [Fact]
-    public void Metadata_UnavailableHistory_OmitsHistoryAndHistoryTruncatedAsNull()
+    public void Metadata_UnavailableHistory_WritesHistoryAndHistoryTruncatedAsExplicitNull()
     {
         var metadata = new ProjectMetadataInfo
         {
@@ -140,10 +135,10 @@ public class ProjectMetadataTests
         using var document = JsonDocument.Parse(json);
         var meta = document.RootElement.GetProperty("metadata");
 
-        // History unavailable: both members are null and must be omitted - never a fabricated
-        // empty list or a hard-coded false that would be indistinguishable from a complete read.
-        Assert.False(meta.TryGetProperty("historyEntries", out _));
-        Assert.False(meta.TryGetProperty("historyTruncated", out _));
+        // Unavailable history stays unknown rather than becoming a fabricated empty list or
+        // false completeness flag.
+        Assert.Equal(JsonValueKind.Null, meta.GetProperty("historyEntries").ValueKind);
+        Assert.Equal(JsonValueKind.Null, meta.GetProperty("historyTruncated").ValueKind);
         Assert.Equal("© ACME", meta.GetProperty("copyright").GetString());
     }
 
@@ -167,6 +162,7 @@ public class ProjectMetadataTests
     [Fact]
     public async Task GetProjectStatus_FullMetadata_RoundTripsOverTheRealIpcPipe()
     {
+        using var uiOpen = FakeWorkerUiOpenProject.ForWorkerRelativePath("status-with-metadata");
         using var client = CreateClient(FakeWorkerLocator.Locate());
 
         var response = await ProjectReadTools.GetProjectStatus(client, "status-with-metadata");

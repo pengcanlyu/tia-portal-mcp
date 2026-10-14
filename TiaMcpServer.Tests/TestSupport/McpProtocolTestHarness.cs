@@ -4,11 +4,19 @@ using Microsoft.Extensions.Options;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Cursors;
+using TiaMcpServer.Network;
+using TiaMcpServer.ProjectLifecycle;
+using TiaMcpServer.ProjectTree;
 using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
+using TiaMcpServer.Tests.Network;
+using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
 
-namespace TiaMcpServer.Tests;
+namespace TiaMcpServer.Tests.TestSupport;
 
 /// <summary>
 /// Runs a real MCP server and a real MCP client in-process over a pair of anonymous pipes, with
@@ -67,9 +75,18 @@ internal sealed class McpProtocolTestHarness : IAsyncDisposable
     /// <paramref name="auditDirectory"/> redirects write-safety audit records away from the real
     /// per-user audit location, so a protocol test that applies a write cannot pollute it.
     /// </summary>
-    public static Task<McpProtocolTestHarness> StartAsync<TTools>(string? auditDirectory = null)
+    public static Task<McpProtocolTestHarness> StartAsync<TTools>(
+        string? auditDirectory = null,
+        string? startupProjectPath = null,
+        McpAccessMode accessMode = McpAccessMode.ReadWrite,
+        bool skipHardwarePreverification = false)
         where TTools : class
-        => StartAsync(auditDirectory, builder => builder.WithTools<TTools>());
+        => StartAsync(
+            accessMode,
+            builder => RegisterToolType<TTools>(builder),
+            auditDirectory,
+            startupProjectPath,
+            skipHardwarePreverification);
 
     /// <summary>
     /// Starts a server exposing BOTH <typeparamref name="TTools1"/> and <typeparamref name="TTools2"/>
@@ -77,14 +94,61 @@ internal sealed class McpProtocolTestHarness : IAsyncDisposable
     /// and a follow-up read against the same process-local scripted worker state (e.g. proving a
     /// multi-homed configure through network_write and observing it through network_read).
     /// </summary>
-    public static Task<McpProtocolTestHarness> StartAsync<TTools1, TTools2>(string? auditDirectory = null)
+    public static Task<McpProtocolTestHarness> StartAsync<TTools1, TTools2>(
+        string? auditDirectory = null,
+        string? startupProjectPath = null,
+        McpAccessMode accessMode = McpAccessMode.ReadWrite)
         where TTools1 : class
         where TTools2 : class
-        => StartAsync(auditDirectory, builder => builder.WithTools<TTools1>().WithTools<TTools2>());
+        => StartAsync(
+            accessMode,
+            builder => RegisterToolType<TTools2>(RegisterToolType<TTools1>(builder)),
+            auditDirectory,
+            startupProjectPath);
 
-    private static async Task<McpProtocolTestHarness> StartAsync(
+    public static Task<McpProtocolTestHarness> StartAsync(
+        McpAccessMode accessMode,
+        Action<IMcpServerBuilder> registerTools,
+        string? auditDirectory = null,
+        string? startupProjectPath = null,
+        bool skipHardwarePreverification = false)
+        => StartCoreAsync(accessMode, registerTools, auditDirectory, startupProjectPath,
+            skipHardwarePreverification: skipHardwarePreverification);
+
+    public static Task<McpProtocolTestHarness> StartProductionSurfaceAsync(
+        McpAccessMode accessMode,
+        string? auditDirectory = null,
+        string? startupProjectPath = null,
+        McpClientOptions? clientOptions = null,
+        TimeSpan? requestTimeout = null)
+        => StartCoreAsync(
+            accessMode,
+            builder => builder.WithAccessModeTools(accessMode),
+            auditDirectory,
+            startupProjectPath,
+            clientOptions,
+            requestTimeout: requestTimeout);
+
+    private static IMcpServerBuilder RegisterToolType<TTools>(IMcpServerBuilder builder)
+        where TTools : class
+        => typeof(TTools) == typeof(ProjectReadTools)
+            ? builder.WithProjectReadTools()
+            : typeof(TTools) == typeof(ProjectBindingTools)
+                ? builder.WithProjectBindingTools()
+                : typeof(TTools) == typeof(NetworkWriteTools)
+                    ? builder.WithNetworkWriteTools()
+                    : typeof(TTools) == typeof(TiaMcpServer.Plc.PlcWriteTools)
+                        ? builder.WithPlcWriteTools()
+                        : builder.WithTools<TTools>();
+
+    private static async Task<McpProtocolTestHarness> StartCoreAsync(
+        McpAccessMode accessMode,
+        Action<IMcpServerBuilder> registerTools,
         string? auditDirectory,
-        Action<IMcpServerBuilder> registerTools)
+        string? startupProjectPath,
+        McpClientOptions? clientOptions = null,
+        bool skipHardwarePreverification = false,
+        TimeSpan? requestTimeout = null)
     {
         var clientWrites = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.None);
         var serverReads = new AnonymousPipeClientStream(
@@ -93,12 +157,13 @@ internal sealed class McpProtocolTestHarness : IAsyncDisposable
         var clientReads = new AnonymousPipeClientStream(
             PipeDirection.In, serverWrites.ClientSafePipeHandle);
 
-        var binding = new ProjectSessionBinding(null);
-        var accessPolicy = new OperationAccessPolicy(McpAccessMode.ReadWrite);
+        var binding = new ProjectSessionBinding(skipHardwarePreverification ? startupProjectPath : null);
+        var accessPolicy = new OperationAccessPolicy(accessMode);
         var workerClient = new OpennessWorkerClient(
             binding,
             logger: null,
             workerExecutablePath: FakeWorkerLocator.Locate(),
+            requestTimeout: requestTimeout,
             accessPolicy: accessPolicy);
 
         var collection = new ServiceCollection();
@@ -106,10 +171,21 @@ internal sealed class McpProtocolTestHarness : IAsyncDisposable
         collection.AddSingleton(binding);
         collection.AddSingleton(accessPolicy);
         collection.AddSingleton(workerClient);
-        collection.AddSingleton(new WriteSafetyService(
-            () => DateTimeOffset.UtcNow,
-            WriteSafetyService.DefaultTokenLifetime,
-            auditDirectory));
+        collection.AddSingleton(sp => new WriteExecution(
+            new OpennessWriteBindingGate(sp.GetRequiredService<OpennessWorkerClient>()),
+            new JsonlWriteAuditSink(auditDirectory), WriteGuardRegistration.ProductionCatalog(), TimeProvider.System));
+        collection.AddSingleton(_ => AuthenticatedCursorProtector.CreateProcessScoped());
+        collection.AddSingleton(sp => new ProjectTreeCursorCodec(
+            sp.GetRequiredService<AuthenticatedCursorProtector>()));
+        collection.AddSingleton(sp => new ProjectTreeSnapshotStore(TimeProvider.System));
+        collection.AddSingleton(sp => new ProjectTreePageProjector(
+            sp.GetRequiredService<ProjectTreeCursorCodec>()));
+        collection.AddSingleton(sp => new ProjectTreeBrowseCoordinator(
+            sp.GetRequiredService<OpennessWorkerClient>(),
+            sp.GetRequiredService<ProjectTreeCursorCodec>(),
+            sp.GetRequiredService<ProjectTreeSnapshotStore>(),
+            sp.GetRequiredService<ProjectTreePageProjector>(),
+            TimeProvider.System));
         registerTools(collection.AddMcpServer());
         var services = collection.BuildServiceProvider();
 
@@ -123,7 +199,13 @@ internal sealed class McpProtocolTestHarness : IAsyncDisposable
         var serverLoop = server.RunAsync(cancellation.Token);
 
         var client = await McpClient.CreateAsync(
-            new StreamClientTransport(serverInput: clientWrites, serverOutput: clientReads));
+            new StreamClientTransport(serverInput: clientWrites, serverOutput: clientReads), clientOptions);
+
+        if (!skipHardwarePreverification && !string.IsNullOrWhiteSpace(startupProjectPath))
+        {
+            await NetworkVerifiedWriteFixture.VerifyAsync(workerClient, binding, startupProjectPath)
+                .ConfigureAwait(false);
+        }
 
         return new McpProtocolTestHarness(
             clientWrites,

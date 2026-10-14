@@ -1,4 +1,4 @@
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Block;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Block;
@@ -53,6 +53,18 @@ public class BlockAddressTests
         Assert.Equal(new[] { "Motion" }, address.FolderPath);
         Assert.Equal("Main", address.BlockName);
         Assert.True(address.IsDeterministic);
+        Assert.True(address.UsesSoftwareUnit);
+    }
+
+    [Fact]
+    public void ParseSupportsSoftwareUnitRootBlockPath()
+    {
+        var address = BlockAddress.Parse("PLC_1/Units/Line1/Blocks/Main");
+
+        Assert.Equal("PLC_1", address.PlcName);
+        Assert.Equal("Line1", address.UnitName);
+        Assert.Empty(address.FolderPath);
+        Assert.Equal("Main", address.BlockName);
         Assert.True(address.UsesSoftwareUnit);
     }
 

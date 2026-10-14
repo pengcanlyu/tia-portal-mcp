@@ -1,0 +1,33 @@
+using TiaMcpServer.Tests.TestSupport;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
+using TiaMcpServer.Tests.TestUtilities;
+using TiaMcpServer.Tools;
+using TiaMcpServer.Worker;
+using Xunit;
+
+namespace TiaMcpServer.Tests.Project;
+
+public sealed class ProjectLifecycleDelegationTests
+{
+    [Fact]
+    public async Task SaveProject_RegisteredToolRequiresVerifiedBindingBeforeTransport()
+    {
+        using var audit = new TempAuditDirectory();
+        var binding = new ProjectSessionBinding(null);
+        using var client = new OpennessWorkerClient(binding,
+            workerExecutablePath: "worker-must-not-start.exe",
+            accessPolicy: new OperationAccessPolicy(McpAccessMode.Full));
+        var before = binding.CaptureSnapshot();
+
+        var result = await ProjectWriteTools.SaveProject(client,
+            LifecycleTestCalls.Execution(client, audit));
+
+        LifecycleTestCalls.Rejected(result, WorkerFailureCategories.BindingConflict);
+        Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+        Assert.Equal(1, LifecycleTestCalls.AuditCount(audit));
+    }
+}

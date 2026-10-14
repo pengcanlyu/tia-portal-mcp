@@ -1,11 +1,15 @@
 # Network Operations Phase 4: Subnet Lifecycle
 
-Status: Phase 4 (subnet create/update/delete) is statically verified. Both the stub build and the
-real V21 reference build pass with zero errors, the full `TiaMcpServer.Tests` suite passes, and the
-whole-plan contract audit against the plan's Locked Public Contract found no discrepancy. Phase 4 is
-**not** marked live-verified. Public-path live acceptance against a real TIA Portal V21 project is a
-separately authorized run (Task 10 of the implementation plan) and has not been attempted, simulated,
-or scheduled by this documentation update. See "Evidence status" below.
+Current guarded candidate: final combined offline qualification and fresh live acceptance are
+pending. The dated Phase4 runs below do not qualify this candidate.
+
+Historical Phase 4 status: subnet create/update/delete is implemented, and focused automated gates verify
+the PR 1 contract repairs. The earlier static audit found discrepancies in the original contract
+implementation. A historical live run applies only to its recorded older commit. The first
+current-revision public attempt on 2026-09-23 failed at connected deletion; the fresh 2026-09-24
+guarded public rerun passed all eight lifecycle operations including both connected deletes. A
+separate final read observed zero subnets and 81 aggregate hardware devices. See "Evidence status"
+below for the bounded live PASS and remaining readback limits.
 
 Design rationale, evidence basis, and rejected alternatives are recorded in
 [../superpowers/specs/2026-08-06-network-phase4-subnet-lifecycle-design.md](../superpowers/specs/2026-08-06-network-phase4-subnet-lifecycle-design.md).
@@ -15,12 +19,12 @@ matches, is at
 See [../roadmap/network-operations.md](../roadmap/network-operations.md) for how this phase fits the
 overall network roadmap, and
 [NETWORK_OPERATIONS_SUMMARY.md](NETWORK_OPERATIONS_SUMMARY.md) for the previously supported
-network operations and the shared canonical JSON contract Phase 4 reuses unchanged.
+network operations and the current guarded canonical contract. Historical Phase4 acceptance uses its recorded earlier contract.
 
 ## Supported operations
 
 Phase 4 adds exactly three write operations to the existing `network_write` tool. No new MCP tool
-was added; the read-write tool count remains 14 and the read-only tool count remains 4.
+was added. The current surface is 7 tools in read-only and 16 in each writable mode. `network_write` is available in read-write and full.
 
 | Operation | Purpose | Required request fields |
 |---|---|---|
@@ -28,8 +32,8 @@ was added; the read-write tool count remains 14 and the read-only tool count rem
 | `update_subnet` | Rename or change PROFIBUS attributes on an existing subnet. | `target: { kind: "subnet", subnetId }`, `subnetChanges` (at least one member) |
 | `delete_subnet` | Delete an existing subnet, connected or not. | `target: { kind: "subnet", subnetId }` |
 
-These three operations do not exist in the generic `preview_write_batch` / `apply_write_batch`
-catalog, do not have an alias, and are not exposed through `network_read`.
+These three operations never existed in the retired generic `preview_write_batch` /
+`apply_write_batch` catalog, do not have an alias, and are not exposed through `network_read`.
 
 ### Request shapes
 
@@ -106,16 +110,18 @@ and network type can never be written through this contract.
 
 ## Exact `subnetId` targeting
 
-`update_subnet` and `delete_subnet` select an existing subnet only by its exact `subnetId`, matched
+`update_subnet` and `delete_subnet` require `target.kind` to be exactly `"subnet"` (ordinal,
+case-sensitive) and select an existing subnet only by its exact `subnetId`, matched
 with ordinal (case-sensitive) string equality against `HardwareConfigInfo.Subnets` as read
 immediately before preview and again immediately before apply:
 
 - there is no fallback to `name`, collection index, connected device, or "first match";
 - a different-cased `subnetId` does not match;
-- zero matches or more than one candidate reporting the same `subnetId` both fail closed with
-  `postcondition_failed` -- neither is treated as success;
+- at host preflight, zero matches fail closed with `target_not_found` and more than one candidate
+  reporting the same `subnetId` with `target_ambiguous`; late worker re-resolution after the host
+  read that finds zero or several fails with `postcondition_failed`;
 - a target subnet whose own `networkType` is missing or outside `Ethernet`/`Profibus` fails closed
-  and is never resolved as a write target.
+  with `target_kind_unsupported` and is never resolved as a write target.
 
 `create_subnet` never accepts a caller-supplied `subnetId`: Openness assigns it, and the created
 subnet's identity is reported back only in the result after the transaction commits.
@@ -136,21 +142,26 @@ add, and does not claim to add:
 
 `delete_subnet` accepts both empty and connected subnets. Deleting a connected subnet:
 
-- **is supported** -- there is no dependency inventory, no connected-node/IO-system enumeration, and
-  no "dependency blocker" that refuses the delete because identity evidence is incomplete;
+- **is supported with complete consequence evidence** -- affected nodes/relationships are inventoried.
+  Connected deletion is informational; incomplete inventory blocks every mode and is never empty evidence;
 - **does not delete devices** -- the worker's `SubnetLifecycleService.Delete` calls only
   `Subnet.Delete()` and verifies `project.Devices.Count` is unchanged after the transaction commits,
   for every delete, not only empty ones;
 - **may clear network-related device attributes as a logical TIA effect** -- removing a subnet's
   relationship to a node or IO system is an expected consequence of deleting the subnet itself inside
-  TIA Portal, not a defect. The subnet lifecycle result never reports which attributes were cleared;
+  TIA Portal, not a defect. Typed immediate/final postchecks inspect the designed deletion consequences;
   a caller that needs to see the after-state calls `network_read` (`read_hardware_config` or
   `inspect_network_object`) separately.
 
-## Minimal result
+For every delete, the worker resolves the exact target and validates its Ethernet/PROFIBUS type
+inside the transaction, captures a nonblank name from that same transaction-local subnet object,
+then calls `Delete()` on it. No pre-transaction subnet object supplies the mutation identity.
 
-Every successful subnet lifecycle item -- create, update, or delete -- returns exactly these four
-members, typed by `TiaMcpServer.Contracts.SubnetLifecycleResultInfo` and enforced by
+## Typed result
+
+Every subnet lifecycle item retains the four core members shown below, plus typed conditional
+worker `verification` required on guarded public calls. The example is the core identity/count excerpt. They are typed by `TiaMcpServer.Contracts.Network.SubnetLifecycleResultInfo`
+and enforced before typed normalization by
 `NetworkPayloadContract`:
 
 ```json
@@ -162,10 +173,11 @@ members, typed by `TiaMcpServer.Contracts.SubnetLifecycleResultInfo` and enforce
 }
 ```
 
-- `subnetId` and `name` are nonblank strings; `networkDeviceCount` is a non-negative integer;
-  `networkDeviceCountUnchanged` must be `true` -- a payload reporting `false`, a missing member, or
-  any extra member (`networkType`, `highestAddress`, connected-node names, device names, IO systems,
-  connections, or any other detail) is rejected as `protocol_error` before it ever reaches the caller.
+- `subnetId` and `name` are nonblank; `networkDeviceCount` is a nonnegative root
+  `project.Devices.Count`, separate from grouped/ungrouped device/node preservation.
+  `networkDeviceCountUnchanged` and typed checks must agree. Missing/unknown/wrongly typed
+  members fail decoding as `protocol_error`; failed/unverified postchecks remain attempted
+  typed failures (`postcondition_failed`) with no replay.
 - For deletion, `subnetId` and `name` are the identity captured immediately before deletion, and the
   post-read proves that `subnetId` is absent afterward.
 - For creation and update, `subnetId` and `name` are the post-read identity after the transaction
@@ -192,24 +204,21 @@ members, typed by `TiaMcpServer.Contracts.SubnetLifecycleResultInfo` and enforce
 
 ## Preview, apply, and safety
 
-Subnet lifecycle operations reuse the existing `network_write` preview/apply protocol unchanged --
-there is no separate subnet-specific safety mechanism:
+Subnet lifecycle uses guarded `network_write(operations, dryRun=false)`. **Omitted dryRun executes**;
+explicit `dryRun:true` inspects effects/guards without mutation or elicitation, and `dryRun:false`
+executes in caller order. No Network server elicitation in read-write/full. A preview reserves no
+state; execution plans/re-plans its own exact current identities under one pinned already-open
+verified binding. Connected deletion is `info`; incomplete inventory is a non-overridable `block`.
 
-- **Preview** (`confirm=false`, no token): reads current `HardwareConfigInfo`, resolves every
-  requested target against it (request-derived for `create_subnet`; exact `subnetId` match for
-  `update_subnet`/`delete_subnet`), and issues a single-use safety token bound to the exact ordered
-  operations, the resolved target evidence, and the current hardware state.
-- **Apply** (`confirm=true` plus the returned token): re-reads hardware state, re-resolves every
-  target against that fresh read, and only then validates and consumes the token. Reordering the
-  operations, changing any request field, or a project-state change since preview (a rename, a
-  deletion, a newly ambiguous `subnetId`) invalidates the token.
-- The token expires after ten minutes and is single-use; a replayed token is rejected.
-- Read-only mode denies all three operations before any worker call: `create_subnet`,
-  `update_subnet`, and `delete_subnet` are classified `ProjectMutation` in `OperationPolicyCatalog`,
-  enforced independently at host tool discovery, host `OperationAccessPolicy`, and worker
-  `WorkerOperationAuthorization`.
-- A successful apply appends an audit record under `%LOCALAPPDATA%\TiaMcpServer\audit`, carrying the
-  exact response document the caller received, exactly like every other `network_write` apply.
+Legacy `confirm`, `acknowledge`, unknown root arguments and nonboolean dryRun
+are SDK/wrapper rejections before tool entry (normal MCP error, no audit). Entered validation/
+binding/guard denials use a canonical root error and one audit. Attempted partial failures remain
+`phase:applied`, `error:null`, MCP `isError:false`; stop on first failure, no batch rollback/replay.
+
+Every entered call appends one audit v2: actual read-write confirmation `none`, actual full `policy`,
+previews/denials `none`, info/block satisfaction null. Exact delivered canonical text/hash is stored;
+item statuses retain execution truth even if whole-value omissions make delivery success false.
+See the [current Network envelope](NETWORK_OPERATIONS_SUMMARY.md#network_write-envelope).
 
 ## Save and compile boundary
 
@@ -246,7 +255,7 @@ Openness-assigned `subnetId`.
 
 ## Evidence status
 
-Two independent lines of evidence exist for Phase 4, and they are not interchangeable:
+The Phase 4 evidence has distinct scopes:
 
 - **Internal probe evidence.** The internal, non-public `probe_subnet_lifecycle_mutations` worker
   operation and `SubnetLifecycleMutationProbeService` exercised subnet creation, editing, and
@@ -254,16 +263,29 @@ Two independent lines of evidence exist for Phase 4, and they are not interchang
   design. This evidence shaped the Locked Public Contract but is not itself the public code path:
   the probe is never registered in `NetworkOperationCatalog`, is absent from the public MCP schema,
   and is not reachable from `network_write`.
-- **Static implementation verification (this document's basis).** The stub build, the real V21
-  reference build, the full `TiaMcpServer.Tests` suite, and a direct whole-plan contract audit of the
-  actual source against the plan's Locked Public Contract all pass. This proves API-shape
-  compatibility, request/response contract correctness, safety-token behavior, and worker dispatch
-  logic on .NET without a live TIA Portal attachment. It does **not** prove runtime Openness
-  behavior through the public MCP path.
-- **Public-path live acceptance -- outstanding.** A separately authorized live run of
-  `scripts/live-test-network-phase4-subnets.ps1` against a disposable TIA Portal V21 project, driving
-  the actual public `network_read`/`network_write` MCP protocol for create, update, and delete
-  (including connected-subnet deletion) on both Ethernet and PROFIBUS, has not been performed. This
-  is Task 10 of the implementation plan and is reserved for the user to authorize and run personally;
-  it was not attempted, simulated, or scheduled as part of this documentation update. Phase 4 must
-  not be marked live-verified until that run completes and its results are recorded here.
+- **Repaired static implementation.** Focused automated gates passed for exact target kind,
+  required raw result members, late-drift classification, transaction-local delete identity, and
+  the restored guarded harness. The executable repair commit
+  `6ce302ea6d096aefd92dfcacceff7711a09d8e71` passed 3098/3098 full Debug tests,
+  real-reference and stub Release builds, and 3098/3098 Release coverage tests. The 2026-09-24
+  docs-only re-pin at `56e2248eacca44ea55c7d246d3c8ceb589b353b9` passed 298 focused tests
+  and a normal-user Debug real-reference host build; its sandbox full Debug run returned 3094/3098
+  with four environment failures. The full Release and coverage gates were not repeated on that
+  re-pin. Static evidence does **not** prove runtime Openness behavior through the public MCP path.
+- **Historical public-path run.** The earlier Phase 4 run is evidence only for the older commit
+  recorded with that run. It cannot establish behavior of the current PR 1 tree after these repairs.
+- **First current-revision public-path attempt -- incomplete on 2026-09-23.** Inventory,
+  Preview, expected negative categories, and isolated Ethernet/PROFIBUS create/update/delete
+  completed. TIA denied connected Ethernet deletion for missing safety-program modification
+  permission and skipped connected PROFIBUS deletion. Portal reported unsaved modifications. The
+  user subsequently confirmed that the disposable copy was closed without saving and reopened.
+- **Fresh current-revision public-path rerun -- bounded live PASS on 2026-09-24.** After the user
+  logged into safety, the guarded harness drove public `network_read`/`network_write` on the
+  frozen candidate. Inventory and Preview reported `isModified=false`; all eight lifecycle
+  operations succeeded, including both originally connected deletes. A separate final Inventory
+  reported zero subnets, 81 aggregate hardware devices (also 81 before Apply), and
+  `isModified=true`. Each operation result reported root `networkDeviceCount=10` and
+  `networkDeviceCountUnchanged=true`, but the harness lacked an independent pre-Apply root-count
+  baseline. It did not independently read back retained-device identities or node and IO-system
+  attributes. No save, compile, download, or persistence result is claimed. See the
+  [current-revision live report](../superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md).

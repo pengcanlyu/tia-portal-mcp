@@ -1,18 +1,13 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Json;
+using TiaMcpServer.Contracts.Network;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Network;
 
 public class CatalogEntryInfoTests
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    private static readonly JsonSerializerOptions JsonOptions = WorkerJson.PayloadOptionsFor(typeof(CatalogEntryInfo));
 
     [Fact]
     public void SerializesDefaultCatalogEntry()
@@ -56,8 +51,10 @@ public class CatalogEntryInfoTests
     }
 
     [Fact]
-    public void NullableFieldsOmittedWhenNull()
+    public void NullableFieldsSerializeAsExplicitNull()
     {
+        // CatalogEntryInfo no longer carries [LegacyNullOmission(RequiredMemberEnforcement)]
+        // (Task 3): null members are now written explicitly instead of omitted.
         var entry = new CatalogEntryInfo
         {
             TypeName = "CPU 1516-3 PN/DP",
@@ -72,11 +69,11 @@ public class CatalogEntryInfoTests
         var json = JsonSerializer.Serialize(entry, JsonOptions);
         var roundTripped = JsonSerializer.Deserialize<CatalogEntryInfo>(json, JsonOptions);
 
-        Assert.DoesNotContain("articleNumber", json);
-        Assert.DoesNotContain("version", json);
-        Assert.DoesNotContain("typeIdentifierNormalized", json);
-        Assert.DoesNotContain("catalogPath", json);
-        Assert.DoesNotContain("description", json);
+        Assert.Contains("\"articleNumber\":null", json);
+        Assert.Contains("\"version\":null", json);
+        Assert.Contains("\"typeIdentifierNormalized\":null", json);
+        Assert.Contains("\"catalogPath\":null", json);
+        Assert.Contains("\"description\":null", json);
         Assert.NotNull(roundTripped);
         Assert.Null(roundTripped.ArticleNumber);
         Assert.Null(roundTripped.Version);

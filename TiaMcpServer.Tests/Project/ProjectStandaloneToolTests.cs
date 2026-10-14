@@ -1,36 +1,35 @@
 using System.Reflection;
 using System.Text.Json;
 using ModelContextProtocol.Server;
-using TiaMcpServer.Batch;
-using TiaMcpServer.Contracts;
+using TiaMcpServer.Contracts.Project;
 using TiaMcpServer.OperationBatches;
+using TiaMcpServer.Tests.TestSupport;
 using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Project;
 
+[Collection(RealWorkerProcessCollection.Name)]
 public class ProjectStandaloneToolTests
 {
-    private static OpennessWorkerClient CreateClient(string workerPath)
+    private static OpennessWorkerClient CreateClient(
+        string workerPath,
+        ProjectSessionBinding? binding = null)
         => new(
-            new ProjectSessionBinding(null),
+            binding ?? new ProjectSessionBinding(null),
             logger: null,
             workerExecutablePath: workerPath);
 
-    private static JsonElement WorkerRequestFromEnvelope(string response)
+    private static async Task VerifyBindingAsync(
+        OpennessWorkerClient client,
+        ProjectSessionBinding binding,
+        string projectPath)
     {
-        using var envelope = JsonDocument.Parse(response);
-        var payload = envelope.RootElement.GetProperty("payload").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(payload));
-        using var request = JsonDocument.Parse(payload!);
-        return request.RootElement.Clone();
-    }
-
-    private static string PayloadFromEnvelope(string response)
-    {
-        using var envelope = JsonDocument.Parse(response);
-        return envelope.RootElement.GetProperty("payload").GetString()!;
+        using var uiOpen = new FakeWorkerUiOpenProject(projectPath);
+        var result = await client.GetProjectStatusAsync(projectPath);
+        Assert.True(result.Success, result.Error);
+        Assert.True(binding.IsVerified);
     }
 
     [Fact]
@@ -47,56 +46,6 @@ public class ProjectStandaloneToolTests
         Assert.True(attribute.ReadOnly);
         Assert.False(attribute.Destructive);
         Assert.False(attribute.OpenWorld);
-    }
-
-    [Fact]
-    public async Task BrowseProjectTree_ForwardsEveryArgument()
-    {
-        using var client = CreateClient(FakeWorkerLocator.Locate());
-
-        var response = await ProjectReadTools.BrowseProjectTree(
-            client,
-            projectPath: "echo",
-            depth: 2,
-            startPath: "PLC_1/Blocks");
-        var request = WorkerRequestFromEnvelope(response);
-
-        Assert.Equal("browse_project_tree", request.GetProperty("method").GetString());
-        Assert.Equal("echo", request.GetProperty("projectPath").GetString());
-        Assert.Equal(2, request.GetProperty("depth").GetInt32());
-        Assert.Equal("PLC_1/Blocks", request.GetProperty("startPath").GetString());
-    }
-
-    [Fact]
-    public async Task BrowseProjectTree_InvalidDepthFailsBeforeWorkerAccess()
-    {
-        using var client = CreateClient("missing-worker.exe");
-
-        var response = await ProjectReadTools.BrowseProjectTree(client, depth: 0);
-
-        using var document = JsonDocument.Parse(response);
-        var root = document.RootElement;
-        Assert.False(root.GetProperty("success").GetBoolean());
-        Assert.Equal(
-            WorkerFailureCategories.ValidationError,
-            root.GetProperty("failureCategory").GetString());
-        Assert.Contains("depth", root.GetProperty("error").GetString());
-    }
-
-    [Fact]
-    public async Task BrowseProjectTree_OversizedSuccess_IsCappedAtMaxItemChars()
-    {
-        using var client = CreateClient(FakeWorkerLocator.Locate());
-
-        var response = await ProjectReadTools.BrowseProjectTree(
-            client,
-            projectPath: "echo",
-            startPath: new string('x', OperationBatchPayloadBudget.MaxItemChars + 100));
-        var payload = PayloadFromEnvelope(response);
-
-        Assert.Equal(OperationBatchPayloadBudget.MaxItemChars, payload.Length);
-        Assert.Contains("[TRUNCATED", payload);
-        Assert.Contains("depth or a more specific startPath", payload);
     }
 
     [Fact]
@@ -118,47 +67,41 @@ public class ProjectStandaloneToolTests
     [Fact]
     public async Task CompileCheck_ForwardsEveryArgument()
     {
-        using var client = CreateClient(FakeWorkerLocator.Locate());
+        const string projectPath = "compile-arguments";
+        var binding = new ProjectSessionBinding(projectPath);
+        using var client = CreateClient(FakeWorkerLocator.Locate(), binding);
+        await VerifyBindingAsync(client, binding, projectPath);
 
         var response = await ProjectEngineeringTools.CompileCheck(
             client,
-            projectPath: "echo",
+            projectPath,
             plcName: "PLC_1",
             blockPath: "PLC_1/Blocks/Main");
-        var request = WorkerRequestFromEnvelope(response);
-
-        Assert.Equal("compile_check", request.GetProperty("method").GetString());
-        Assert.Equal("echo", request.GetProperty("projectPath").GetString());
-        Assert.Equal("PLC_1", request.GetProperty("plcName").GetString());
-        Assert.Equal("PLC_1/Blocks/Main", request.GetProperty("blockPath").GetString());
+        var root = StandaloneStatusToolTests.Document(response);
+        Assert.True(root.GetProperty("success").GetBoolean());
+        var report = root.GetProperty("result").GetProperty("value");
+        Assert.Equal("block", report.GetProperty("scope").GetString());
+        Assert.Equal("PLC_1", report.GetProperty("plcs")[0].GetProperty("plcName").GetString());
+        Assert.Equal("PLC_1/Blocks/Main", report.GetProperty("blockPath").GetString());
     }
 
     [Fact]
-    public async Task CompileCheck_OversizedSuccess_IsCappedAtMaxItemChars()
+    public async Task CompileCheck_OversizedBlockPath_IsWholeValueOmission()
     {
-        using var client = CreateClient(FakeWorkerLocator.Locate());
+        const string projectPath = "compile-arguments";
+        var binding = new ProjectSessionBinding(projectPath);
+        using var client = CreateClient(FakeWorkerLocator.Locate(), binding);
+        await VerifyBindingAsync(client, binding, projectPath);
 
         var response = await ProjectEngineeringTools.CompileCheck(
             client,
-            projectPath: "echo",
-            blockPath: new string('x', OperationBatchPayloadBudget.MaxItemChars + 100));
-        var payload = PayloadFromEnvelope(response);
-
-        Assert.Equal(OperationBatchPayloadBudget.MaxItemChars, payload.Length);
-        Assert.Contains("[TRUNCATED", payload);
-        Assert.Contains("plcName or blockPath", payload);
+            projectPath,
+            blockPath: new string('x', StructuredOperationBatchPayloadBudget.MaxItemChars + 100));
+        var root = StandaloneStatusToolTests.Document(response);
+        var outcome = root.GetProperty("result");
+        Assert.Equal("omitted", outcome.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, outcome.GetProperty("value").ValueKind);
+        Assert.Contains("plcName or blockPath", outcome.GetProperty("omission").GetProperty("guidance").GetString());
     }
 
-    [Fact]
-    public async Task GetProjectStatus_OversizedSuccess_IsCappedAtMaxItemChars()
-    {
-        using var client = CreateClient(FakeWorkerLocator.Locate());
-
-        var response = await ProjectReadTools.GetProjectStatus(client, projectPath: "status-oversized");
-        var payload = PayloadFromEnvelope(response);
-
-        Assert.Equal(OperationBatchPayloadBudget.MaxItemChars, payload.Length);
-        Assert.Contains("[TRUNCATED", payload);
-        Assert.Contains("Extended metadata", payload);
-    }
 }

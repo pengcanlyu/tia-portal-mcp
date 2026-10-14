@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using TiaMcpServer.Contracts.Block;
+using TiaMcpServer.Contracts.Worker;
 
 namespace TiaMcpServer.OperationBatches;
 
@@ -10,8 +12,14 @@ public static class StructuredOperationSkipReasons
     public const string EarlierOperationFailed = "earlierOperationFailed";
 }
 
-/// <summary>Why one operation failed. <paramref name="Category"/> is a WorkerFailureCategories value.</summary>
-public sealed record StructuredOperationFailure(string Category, string Message);
+/// <summary>
+/// Why one operation failed. <paramref name="Category"/> is a WorkerFailureCategories value.
+/// <paramref name="BlockImportOutcome"/> is present only on a failed content-import item.
+/// </summary>
+public sealed record StructuredOperationFailure(
+    string Category,
+    string Message,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BlockImportOutcomeInfo? BlockImportOutcome = null);
 
 /// <summary>Why one operation's result was withheld, and how to retrieve it.</summary>
 public sealed record StructuredOperationOmission(
@@ -19,7 +27,14 @@ public sealed record StructuredOperationOmission(
     int? LimitChars,
     int OriginalChars,
     string RetryTool,
-    string Guidance);
+    string Guidance,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StructuredOperationOmissionSubject? Subject = null);
+
+/// <summary>Identifies the omitted result without changing existing omission wire shapes.</summary>
+public sealed record StructuredOperationOmissionSubject(
+    string Kind,
+    string Name,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Identifier);
 
 /// <summary>
 /// One operation's outcome. <see cref="Result"/> is always a detached <see cref="JsonElement"/>

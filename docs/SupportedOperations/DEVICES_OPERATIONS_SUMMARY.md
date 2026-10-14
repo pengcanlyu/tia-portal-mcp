@@ -4,20 +4,20 @@
 
 | Entry point | Operation | Inputs and behavior |
 |---|---|---|
-| `execute_read_batch` | `read_hardware_config` | Reads devices, device items, network interfaces, nodes, subnets, and IO-system information represented by the hardware DTOs. |
-| `execute_read_batch` | `search_equipment_catalog` | Requires `query`; accepts bounded `maxResults`; returns catalog type identifiers for candidate devices. |
-| `preview_write_batch` → `apply_write_batch` | `add_network_device` | Requires an exact catalog `typeIdentifier` and `deviceName`; accepts optional `deviceItemName`. |
-| `preview_write_batch` → `apply_write_batch` | `configure_network_device` | Requires `deviceName`; accepts `ipAddress`, `subnetMask`, `pnDeviceName`, `subnetName`, and `ioSystemName`. |
-| `browse_project_tree` | `browse_project_tree` | Locates devices and other project objects; accepts optional `projectPath`, `depth`, and `startPath`. |
+| `network_read` | `read_hardware_config` | Recursively discovers devices both at project root and in nested device groups, then reads device items, network interfaces, nodes, subnets, and IO systems. Optional `deviceName` filter, `plcName`, opt-in structured I/O extraction (`includeIoDetails`, `includeTagMatches`), and bounded pagination (`pageSize`, `cursor`) — see [NETWORK_OPERATIONS_SUMMARY.md](NETWORK_OPERATIONS_SUMMARY.md). |
+| `network_read` | `search_equipment_catalog` | Requires `query`; accepts bounded `maxResults`; returns catalog type identifiers for candidate devices. |
+| `network_write` (guarded) | `add_network_device` | Requires an exact catalog `typeIdentifier` and `deviceName`; accepts optional `deviceItemName`. |
+| `network_write` (guarded) | `configure_network_device` | Requires `target: { deviceName, nodeId }` naming an existing node and `changes` with at least one of `ipAddress`, `subnetMask`, `pnDeviceNameAutoGeneration`, `pnDeviceName`, `subnet: { subnetId }`, and `ioSystem: { subnetId, number }`. |
+| `browse_project_tree` | `browse_project_tree` | Recursively discovers the same direct and grouped devices as flat `Device` nodes; accepts optional `projectPath`, `startSelector`, `depth`, `pageSize`, and `cursor`. |
 
-`add_network_device` and `configure_network_device` are data writes. Preview the complete ordered sequence and apply it with the returned token. The catalog identifier and device name are validated before the worker performs the change.
+`add_network_device` and `configure_network_device` are data writes. Preview with `dryRun:true`; execute with `dryRun:false` or omitted `dryRun`, without server elicitation. Exact already-open verified binding is required; no tokens, rollback or automatic replay. The catalog identifier and device name are validated before the worker performs the change.
 
 ## Device data model
 
 The hardware read path is an inspection surface. The write path is limited to catalog-based device creation and selected device/network identity fields:
 
 - Device creation uses a catalog `typeIdentifier`.
-- `deviceItemName` applies to creation and defaults to `deviceName` when omitted.
+- `deviceItemName` applies to creation and defaults to `deviceName` when omitted; a blank or whitespace value is a `validation_error`.
 - Hardware results can contain nested device items and network metadata.
 - Generic attribute enumeration and arbitrary device or device-item attribute writes are not part of the MCP contract.
 
@@ -25,11 +25,14 @@ The hardware read path is an inspection surface. The write path is limited to ca
 
 The current surface does not provide:
 
-- Device groups, ungrouped-device management, or general device rename/delete.
+- Device-group creation, deletion, rename, or moving devices between groups. Existing grouped devices are discovered by read operations but group folders are not exposed as tree nodes.
 - Plug, move, copy, delete, or device-item/module-type changes.
 - Slot, subslot, and module manipulation beyond `add_network_device`.
 - Generic `GetAttributeInfos`, `GetAttributes`, or `SetAttributes` calls.
-- Module-specific hardware parameters, IO addresses, diagnostics, channels, or hardware identifiers.
+- I/O-address, channel, or address-controller **writes**. Read-only I/O extraction (`ioDetails`
+  addresses/channels and optional PLC tag matches) is available on `read_hardware_config` — see
+  [NETWORK_OPERATIONS_SUMMARY.md](NETWORK_OPERATIONS_SUMMARY.md) — but module-specific hardware
+  parameters, diagnostics data, and hardware identifiers remain unexposed.
 - A device-level software-container API; PLC blocks, tags, and constants use the PLC operations described in [PLC_OPERATIONS_SUMMARY.md](PLC_OPERATIONS_SUMMARY.md).
 
 ## Related operations

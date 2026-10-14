@@ -26,6 +26,275 @@ well-designed. The three biggest problems, in order of impact:
 
 ---
 
+## Open: create_block OB follow-ups (issue #75, 2026-10-09)
+
+Left out of [OB creation](superpowers/specs/2026-10-08-ob-creation-design.md) by design; none blocks
+the shipped behavior.
+
+- **Renumbering.** No `set_block_number` operation exists: a created OB keeps the number the server
+  picked, and a wrong or unwanted number needs TIA Portal. Add it when a workflow needs caller-chosen
+  or changed OB numbers.
+- **OB event parameters.** Created OBs use TIA defaults. `CyclicInterrupt` cyclic time and phase
+  offset, priority, the `TimeOfDay` schedule and `HardwareInterrupt` triggers cannot be set (the
+  live compile of a new hardware-interrupt OB reports the "no triggers defined" warning).
+- **`SynchronousCycle`.** Not offered: it does not compile on any CPU that accepts it until an
+  isochronous IO system is assigned, which no tool here can configure.
+- **Live evidence limits.** The S7-1200 G2 PLC was not exercised in the 2026-10-09
+  [live acceptance](superpowers/acceptance/reports/2026-10-09-ob-creation-live-acceptance.md); the
+  Phase 0 spike covered it by import only.
+
+## Open: Multiuser successor operations
+
+PR 2 implements the internal active project context and typed lifecycle owners on the merged
+PR 1 foundation. Its frozen standalone candidate is offline qualified and live accepted within
+the bounds in the [acceptance report](superpowers/acceptance/reports/2026-10-05-multiuser-pr2-active-project-context-live.md).
+PR 3 implements six explicit discovery/inventory actions through `bind_project` without a new
+tool or binding mutation. Its combined offline qualification is recorded in the
+[PR 3 report](superpowers/acceptance/reports/2026-10-06-multiuser-pr3-offline-validation.md).
+PR 3 live acceptance was subsequently finished and passed by maintainer decision on 2026-10-06;
+the [live report](superpowers/acceptance/reports/2026-10-06-multiuser-pr3-live-verification.md)
+preserves executed observations and non-blocking unexecuted cases. Successor Multiuser operations remain open.
+The [Multiuser boundary](SupportedOperations/MULTIUSER_OPERATIONS_SUMMARY.md) distinguishes
+this partial delivery from Issue #65 completion. PR4 now delivers exact `.amc21` adoption,
+basic local status/startup assertions and explicit `.als21` opening. Its
+[October 8 report](superpowers/acceptance/reports/2026-10-08-multiuser-pr4-live-verification.md)
+records offline qualification and scoped maintainer live acceptance; both noninteractive
+offline read-write opens failed because Siemens dialogs required dismissal. Full offline,
+headless/race and other matrix rows remain unexecuted. PR5 delivers local-session content reads
+and fixes the unmapped `hmi_*` capability check that refused `hmi_read` for every container; see the
+[October 9 report](superpowers/acceptance/reports/2026-10-09-multiuser-pr5-live-verification.md).
+PR6 delivers local-session PLC/Network writes, `compile_check` and `LocalSession.Save()` through
+`save_project`; the
+[PR6 report](superpowers/acceptance/reports/2026-10-09-multiuser-pr6-live-verification.md)
+covers Multiuser and Exclusive sessions in `full` mode. Read-write local-save confirmation,
+worker-opened and offline sessions are unexercised live. Markings, terminal actions and server
+mutation remain later work. Preserve
+`bind_project`, host binding ID/revision, configured-selector checks, detach ownership, guarded
+lifecycle confirmation, and audit v2. Capability descriptions remain descriptive, not permission.
+
+## Open: Reliable local-session distinction for one server project (2026-10-07)
+
+The PR 4 prerequisite probes distinguished two observed local owners by their different typed
+`LocalSession.Project.Path` engineering `.amc21` paths. This does not establish a durable local
+session ID or a supported join to Project Server inventory. Qualify a supported owner/session
+identity for different local sessions associated with the same server project before relaxing
+PR 4's fail-closed handling of same/ambiguous paths, owner replacement, or unknown remote identity.
+An explicit `.als21` opener remains provenance; filenames and directory hierarchy establish
+neither cold-adoption identity nor engineering/exclusive mode.
+
+Distinguishing multiple sessions bound to the same server project remains future work;
+PR4's observed AMC paths and successful opens do not close this follow-up or Issue #65.
+
+## Open: totally-integrated-claude tia-portal-mcp skill migration
+
+Update the plugin's source `tia-portal-mcp` skill in a separately authorized plugin change to teach
+6/15/15 tool counts (at the time; now 7/16/16 with `hmi_read`) (`plc_read` and `read_cross_references` replace the retired `execute_read_batch`;
+`plc_write` replaces `preview_write_batch`/`apply_write_batch`, with `content` plus
+`expectedContentHash` instead of `yamlContent`/`sourceContent` and no safety token; full adds no
+tools and PLC run/stop is gone), `bind_project` for already-open projects, no implicit opens, per-call
+read-write lifecycle confirmation, full policy confirmation, removed startup switch/agent
+confirmation arguments, audit v2, and binding-scoped tree cursors. Preserve the distinction between
+functional live evidence and human dialog observations. This repository task changes no installed
+plugin cache or user configuration.
+
+## Open: PLC read and cross-reference follow-ups (PR A)
+
+Found while finishing [PR A](superpowers/plans/2026-10-05-plc-read-and-cross-references.md); none blocks it.
+
+- Network: `PlcSoftwareLocator.FindAll` (used by Network) never sees PLCs in device groups; `FindEveryPlc` does.
+- `totally-integrated-claude` skill: tracked in the skill-migration entry above (at the time 6/15/15 and `plc_write`; now 7/16/16 with `hmi_read`).
+- `list_tag_tables`: when `tableName`/`folderPath` match nothing but part of the tree was unreadable, the incomplete inventory is returned without an explicit "not found among readable tables" message.
+- `read_cross_references` budget: the trim never recurses inside a kept child; a bare source over budget (pathological names or messages) is still withheld by the renderer; the standalone fallback guidance omits `filter`.
+- `read_cross_references`: a `maxResults` cut does not count into `omittedSourceCount`; the shared incomplete message mentions "unused-object audit" for every filter.
+- `read_cross_references`: legacy `referencedAsName` is kept beside `referencedAs` (it carries call-site text when `referencedAs` is null); decide whether to keep it.
+- The Plc protocol diagnostic duplicates Network's private `TryWriteProtocolDiagnostic` (missing `validators` field, 512 cap); share one helper.
+- `CrossReferenceTargetResolver.MatchOne` duplicates `ProjectTreeFilter.ResolveOne`'s predicate (drift is pinned by a round-trip test).
+- Unverified cross-reference owner kinds (spec Appendix B): technology objects and Unified `HmiTag` are verified but not shipped; TO instance DBs and Classic HMI tags were not present in the spike project.
+
+## Open: hmi_read follow-ups (2026-10-08)
+
+Found while building and live-accepting [`hmi_read`](superpowers/specs/2026-10-07-hmi-read-design.md)
+([live acceptance report](superpowers/acceptance/reports/2026-10-08-hmi-read-live-acceptance.md)); none
+blocks it. Known limits are also listed in the
+[HMI operations summary](SupportedOperations/HMI_OPERATIONS_SUMMARY.md#known-limits).
+
+- **PR B: Unified `HmiTag` owner kind in `read_cross_references`.** Needs an HMI selector;
+  `browse_project_tree` has no HMI nodes.
+- **Performance of whole-project scans.** About 21-23 s per call on a large PC station regardless of
+  `limit`; paging is stateless, so each page re-scans (1,286 faceplates = 13 calls of about 22 s each).
+  Consider cursors or caching.
+- **Non-integral values unverified live.** The project had only integral values. Encoding is now
+  explicit (`G15`/`G17`, `G7`/`G9`) and runtime-independent, so the offline test covers net48 too.
+- **Live evidence gaps.** Analog alarms, non-default connection drivers, tag comments, live validation
+  errors and warnings (finding shape covered offline only) and non-default Object values.
+- **Unread properties.** `GmpRelevant` and `MandatoryCommenting` are never read (unknown hazard, like
+  `ConfirmationType`, which crashed TIA Portal in the spike).
+- **`validate` scope.** Narrower than the spike's validatable set: member tags, logging tags and screen
+  items are excluded.
+- **Redaction coverage for unseen drivers.** The secret-name denylist (`password`, `passwd`,
+  `passphrase`, `pwd`, `secret`, `token`, `credential`, `privatekey`) is inference, not observed: only
+  S7-1200/1500 drivers were seen live. Check OPC UA and third-party drivers' property names and
+  `InitialAddress` forms (for example credentials embedded in a URL) when such a project is available.
+- **Portal exit after detach.** In spike run 2, TIA Portal exited about 4 s after the worker detached.
+  The cause (a user close, or an exit on detach) was not determined and it was not reproduced; a
+  possible crash-on-detach hazard to watch for.
+- **Duplicate reader helpers (final review M3).** `HmiTagReader` keeps its own `Guard` (identical to
+  `HmiReadLog.Guard`), `Variant` and `ReadComment`, duplicating `HmiAlarmReader.ReadVariant`/`ReadText`,
+  which `HmiScreenReader` borrows. Move `ReadText`/`ReadVariant` onto `HmiReadLog` and delete the copies.
+- **Two completeness idioms (final review M4).** The tag reader sets `isComplete` from
+  `Messages.Count == 0` while the other readers use `HmiReadLog.IsComplete`, and `HmiTextMapper.Map`
+  writes messages without flipping completeness. Route text reads through one `ReadText` that calls
+  `Fail` and use `HmiReadLog.IsComplete` everywhere.
+- **System tags fill the first `validate` tag pages (final review M8).** `@`-prefixed system tags sort
+  first and are counted in `scanned` as `notValidatable`. Order user tags first, or leave system tags out
+  of `scanned`.
+- **Comfort `get_runtime_settings` always incomplete (final review M9).** `GMPEnabled` and
+  `GeneralESIGCommentsStrategy` are documented as unsupported on Comfort panels yet mark every result
+  incomplete, hiding transient failures. Consider `HmiReadLog.Note` for spike-documented unsupported
+  properties.
+
+## Open: plc_write follow-ups (PR B, 2026-10-07)
+
+Found while building and live-accepting [PR B](superpowers/plans/2026-10-06-plc-write.md)
+([validation report](superpowers/acceptance/reports/2026-10-07-plc-write-validation.md)); none
+blocks it. Known limits are also listed in the
+[PLC operations summary](SupportedOperations/PLC_OPERATIONS_SUMMARY.md#known-limits).
+
+- **Software-unit blocks counted in the CPU namespace (M2, confirmed false live).** `create_tag`
+  named `SU_DB` is blocked as `plc_name_collision` against `PLC_LAD/Units/Test_SU/Blocks/SU_DB`.
+  The maintainer confirmed that unpublished unit blocks cannot be referenced outside the unit. It
+  fails closed. Exclude unpublished unit blocks from the CPU namespace, and check the related
+  worker minor where a unit-scoped create checks the top-level PLC namespace instead of the unit's.
+- **`isSafety` is not verified after write (M4).** The verifier checks the other tag values only.
+- **`compile_check` cannot reach PLCs in device groups (M5).** It still uses
+  `PlcSoftwareLocator.FindAll`, which walks root devices only; `plc_write` resolution moved to `FindUnique`.
+- **Fold `NetworkWriteArgumentValidatingTool` onto `StrictArgumentsTool`.** `plc_write` uses the
+  shared strict-arguments wrapper; Network keeps its own copy.
+- **Per-target inventory completeness (D7).** Completeness exists only at the inventory root, so
+  one unreadable table or device item makes `plc_state_unverifiable` fire for every item in the
+  call. Track completeness per PLC/table so unrelated targets can plan.
+- **User-constant null-value conflation.** An unreadable constant value is reported only as
+  `Value == null`, which cannot be told apart from a genuinely empty value; update and delete of
+  such a constant block conservatively. Add an explicit readability marker to the worker payload.
+- **`plc_read` content reads became unique-PLC (D5).** The shared block/type target resolvers now
+  use `FindUnique`, so a content read on a project with several PLCs and no `plcName` fails
+  `target_ambiguous` instead of reading the first match. Intended (the read hash and the write check
+  hit the same object); record it in release notes.
+- **Network write messages still use the unconditional 512-character compaction** that `plc_write`
+  dropped. Align Network with the PLC budget, which omits only whole values.
+- **Guard reservation ceiling.** `MeasureProtectedCore` reserves two guards per item, but a PLC item
+  can fire about four, so `Compose` could throw after mutation. Network has the same ceiling.
+- **Diagnostic strings are not counted by `AnyOverItemLimit`.** One diagnostic over 60,000
+  characters inside a document under 180,000 is delivered intact instead of omitted.
+- **Result echo differs from the effect.** `create_block` reports `blockType:"GLOBALDB"` and a group
+  path without `Blocks/` in its result, unlike the effect. `removes.blocks` order is
+  enumeration-dependent between a dry run and the apply.
+- **Pipeline note: late acknowledge guards.** A late acknowledge guard identical to one the user
+  already accepted still blocks the dependent item in read-write (`GuardDecisions.DecideLate`). No
+  PLC guard is acknowledge-level today, so `plc_write` is unaffected.
+- **plc_write review minors (Tasks 1–8),** one line each:
+  - `PlcNameRulesTests` lacks the "same name, different kind/container, self passed" collision case.
+  - `PlcSoftwareLocator` keeps two near-identical device walkers and a duplicated name filter.
+  - `RequireReadableValue`'s `EngineeringException` branch and nested system-block group recursion are untested.
+  - No behavioural test drives `BlockImporter`/`PlcTypeImporter` into a hash mismatch; the `IndexOf` source-order contracts are brittle.
+  - `RequireNameUnoccupied` uses Siemens `Blocks.Find` (case sensitivity unverified) but `OrdinalIgnoreCase` for groups.
+  - Duplicated "No block exists at…" message; the XML path resolves the target twice.
+  - `PlcTypeTargetResolver` throw sites are covered only by a source contract.
+  - The created-earlier check keys on folder path (the planner catches the missed case).
+  - `blockImportOutcome` on failures sits outside the document-budget drop order.
+  - `ConditionalMemberRegisterTests` scans one host type by hand.
+  - `Apply` re-runs `Resolve` (double resolution per item); `RequireTable` is called twice in one case.
+  - The `"Type"` kind is a string literal instead of a `PlcNameRules` constant.
+  - The `StaleContentHash` test's "before any write" assertion can never fail.
+  - `HiddenAt` is over-conservative: a skipped sibling makes a miss in a fully read group unverifiable (block, never a wrong not-found).
+  - Effect-presentation omission reason is ambiguous (diff versus whole effect); `Compact` takes `MaxDocumentChars` as a constant.
+  - `VerifyStructural` reports `actual:"absent"` for `target_ambiguous`.
+  - `MutateAsync` uses the item path while planning and verification use the call path.
+  - The `uiOpen` list was not edited for the `plc_write` probes (default branch used).
+  - A never-ran failed item can still make `verification.success` false.
+  - Rename `Start`→`Go` then create `Start` supersedes the rename on the shared key, so `Go` is never verified; verifier and planner supersession keys differ.
+  - `WorkerTransportFailureGuidanceTests` rows for retired names only test the unknown-operation path.
+  - FakeWorker scenario comments still describe the retired Network token flow.
+
+## Open: Deeper project-tree resolver optimization (Issue #32 follow-up)
+
+The user accepted the combined offline and read-only live v3 evidence on 2026-09-12, with an
+explicit live ambiguity waiver. The
+[accepted report](superpowers/acceptance/reports/2026-09-06-issue-32-project-tree-v3-live.md)
+records the timing distributions, multi-page completion, evidence boundaries, and waiver.
+
+The shipped v3 initial browse performs one net48 typed/scoped walk, then strict host decode,
+post-filter flattening, bounded immutable snapshot storage, and canonical page projection;
+continuations use the authenticated process-local cursor and cached snapshot with zero worker calls.
+A deeper direct Openness selector resolver and depth-pruned walk is a measured follow-up only. It is
+not shipped behavior and should proceed only if additional measurements justify its benefit without
+changing the approved public contract. Acceptance of the current implementation does not complete
+this optimization.
+
+## Open: Network Phase 5 public IO-system editing
+
+PR 2's 2026-09-26 guarded worker-only V21 matrix verified exact PN/DP controller interface
+owners, their distinct master PLC hardware compile targets, baseline compiles, and one-field
+edit/restoration evidence. The [qualified contract](superpowers/specs/2026-09-24-network-phase5-qualified-contract.md)
+admits PN/DP `Name` and `Number` plus PN `UseIoSystemNameAsDeviceNameExtension` for later
+public planning. PN `MultipleUseIoSystem` remains excluded after linked PN-name evidence became
+unavailable following a committed edit; `MaxNumberIWlanLinksPerSegment` remains unproved.
+The [acceptance report](superpowers/acceptance/reports/2026-09-24-network-phase5-pr2-qualification.md)
+records two reverse `Name` runs whose worker edit/compile succeeded but whose final harness
+status failed solely on transient project-size drift, and the clean close-without-save/reopen
+result. No failed hardware compile was induced. `update_io_system` remains unshipped. The next
+public slice still needs a fresh plan from merged `main`, strict TDD, the canonical safety and
+audit gate, and its own live public-path acceptance.
+The live Portal matrix ran at `03bf387`, not at the later branch HEAD. After
+the post-live host/test project-reference and CI changes, no `.cs` or `.ps1`
+file changed; the rebuilt dependency manifest still matched, although five
+of 53 core PE files differed. The user accepted the changes as having no live
+impact. A fresh full coverage run passed 3,371/3,371 at line rate 0.9409
+against the 0.80 threshold, and both serial builds passed with zero errors
+and seven existing warnings. PR 2 is merge-ready by the explicit
+source/behavioral-equivalence carry-forward, not by binary identity or a
+current-HEAD Portal rerun. No merge was performed.
+
+## Open: JSON contract Phase 1b follow-ups
+
+These came out of the Phase 1b final review ([plan](superpowers/plans/2026-09-28-json-contract-phase1b-required-members.md)).
+None of them blocks the merge.
+
+- **Tag-match null path (predates Phase 1b).** `TagTableReader` → `HardwareTagIndexResolver` →
+  `HardwareIoMapReader` pass Openness strings unguarded into the non-nullable `IoTagMatchInfo`
+  members `Name`, `DataType`, and `TableName`. A null from Openness makes the whole
+  `read_hardware_config` result `protocol_error`. That fails closed, as before the branch. A worker
+  fallback with a message would keep the read usable.
+- **Worker version mismatch.** The host now requires the network payloads to write explicit
+  nulls, so the payloads of a worker built before Phase 1b are rejected as `protocol_error`. Host
+  and worker ship in one package, so this fails safe. An optional protocol capability would turn
+  it into an explicit version-mismatch message.
+- **`update_subnet` null or blank read-back name.** If Openness reads back no name after the update
+  has committed, the host rejects the result as `protocol_error`. `postcondition_failed` would
+  describe it better, but that is new behavior and was kept out of Phase 1b.
+- **File sizes.** `TiaMcpServer/Network/NetworkPayloadContract.cs` is 831 lines and
+  `TiaMcpServer.Tests/Network/NetworkPayloadContractTests.cs` is 1281 lines. The test file repeats
+  the full 16-member selector and 19-member evidence objects about 20 times.
+- **Test precision.** The five tag-match rejection cases in `NetworkIoMapPayloadContractTests` have
+  no accepted control. `NetworkPayloadContractTests.Rules.cs` asserts that the validator appears
+  anywhere in the diagnostic chain; asserting `chain[0]` would be tighter.
+
+## Open: network_write live-defect follow-ups (2026-10-05)
+
+Deferred by user decision while fixing the live `network_write`/`network_read` defects; none
+blocks that branch.
+
+- **A5 null `DeviceItem` TypeIdentifier in selectors.** TIA reports a null type identifier for some
+  device items. The hardware read no longer reports it as a message; whether a null
+  `typeIdentifier` is optional selector evidence is still undecided.
+- **Device-scoped subnet scoping for `read_hardware_config`.** A `deviceName`-filtered read still
+  returns every project subnet. The message fixes shrank the unfiltered test-project read from
+  108,229 to 87,512 characters, still above the 60,000-character per-item limit. Measure before
+  scoping subnets to the selected device.
+- **Live harness final-check count.** `scripts/live-test-network-guarded-write.ps1` requires an
+  exact final-check count that does not account for skipped-setting preservation checks. The user
+  asked to leave the scripts unchanged for now.
+
 ## Phase 0 — Quick wins (small-model usability; ~1 day total, all low-risk)
 
 | # | Change | Where | Why |
@@ -55,7 +324,7 @@ well-designed. The three biggest problems, in order of impact:
 |---|--------|-------|-----|
 | 2.1 | **Persistent worker process**: keep the worker alive across requests (request loop already exists in worker `Program.cs:34` — the client kills it by closing stdin at `OpennessWorkerClient.cs:635`). Single `Attach()`, managed project open/close, health check + restart-on-crash, `SemaphoreSlim` serialization of requests | `OpennessWorkerClient.cs` | Fixes all 3 CRITICALs at once (re-attach per call, leaked project handles, concurrent mutation races); cuts preview→apply wall-clock far below the 10-min token TTL; makes 50-item batches practical (today: up to 3N spawns per write batch) — DONE 2026-07-16 |
 | 2.2 | Interim (if 2.1 is deferred): add `SemaphoreSlim(1,1)` around `SendAsync` now | `OpennessWorkerClient.cs:614` | One-line mitigation for the concurrency CRITICAL — DONE 2026-07-15 |
-| 2.3 | **Bound read payloads**: `depth`/`startPath` on `browse_project_tree`, `maxResults` on `search_equipment_catalog` + `read_cross_references`, plus a server-side byte budget with an explicit "truncated — narrow with plcName/filter/startPath" trailer | worker readers + batch schema | Only finding that can hard-kill a small model's session (README's own smoke test batches tree+hw+xref+catalog into one call) — DONE 2026-07-16 |
+| 2.3 | **Bound read payloads**: `depth`/`startPath` on the historical v2 `browse_project_tree`, `maxResults` on `search_equipment_catalog` + `read_cross_references`, plus a server-side byte budget with an explicit "truncated — narrow with plcName/filter/startPath" trailer | worker readers + batch schema | Only finding that can hard-kill a small model's session (README's own smoke test batches tree+hw+xref+catalog into one call) — DONE 2026-07-16. The `startPath` input and truncation-trailer response were removed by the v3.0.0 project-tree cutover. |
 | 2.4 | Collapse lifecycle preview/apply pairs: calling a write tool WITHOUT a token returns the preview + token instead of an error → 16 tools become 10 | `Tools/ProjectLifecycleTools.cs` | Removes the "which preview matches this apply" lookup; kills the asymmetric-naming trap (`preview_write_batch`/`apply_write_batch` vs `preview_open_project`/`open_project`) — DONE 2026-07-16 |
 | 2.5 | Evict expired tokens (sweep on `CreatePreview` is enough — no timer needed); validate token BEFORE the expensive N-spawn state re-read in apply | `WriteSafetyService.cs:16-36`, `BatchTools.cs:94-110` | Unbounded memory growth; dead tokens currently cost a full read pass — DONE 2026-07-16 |
 
@@ -87,7 +356,7 @@ redirecting the audit directory, but the tool layer could not use that test-spec
 Task 2. DI now makes that isolation available to the tests.
 
 
-Also confirmed live, all working as designed: bounded reads with `depth`/`startPath`/`maxResults`
+Also confirmed live for the historical v2 surface, all working as designed: bounded reads with `depth`/`startPath`/`maxResults`
 plus the explicit truncation trailer (2.3); per-item batch isolation, where a failing `compile_check`
 did not stop two sibling reads; `messages` arrays surfacing partial-read degradation rather than
 silently returning defaults (1.3/1.4) — `read_hardware_config` reported 20 unreadable device
@@ -361,3 +630,588 @@ a narrowly-scoped internal basic-status read (`get_basic_project_status` /
 `GetBasicStatusReadOnly`) so `open_project`, `create_project`, `save_project`, `save_project_as`,
 and `archive_project` never perform the extended metadata read after a write. The history cap was
 lowered from 1000 to 200 entries so a full history payload stays well inside the response budget.
+
+## Structured read-only PLC I/O map for read_hardware_config - DONE 2026-08-13
+
+`read_hardware_config` now supports opt-in, read-only structured I/O extraction. A default read
+(with no flags) is byte-identical to earlier versions: `DeviceItemInfo.IoDetails` is
+`JsonIgnore(WhenWritingNull)` so it is absent from default output and from internal network-write
+safety-token state hashes, which stay lightweight and unchanged.
+
+New request options: `deviceName` (ordinal-ignore-case, exactly-one-match device filter), `plcName`
+(exact ordinal PLC selection for tag matching), `includeIoDetails` (structured `ioDetails` with
+addresses and channels), and `includeTagMatches` (requires `includeIoDetails`). New Contracts DTOs
+`DeviceItemIoDetailsInfo`/`IoAddressInfo`/`IoChannelInfo`/`IoTagMatchInfo` carry raw Openness
+evidence: byte-based address `startAddress`/`length`, bit-based channel
+`channelAddressBits`/`channelWidthBits`, dynamic `context`, and ordinal `controllerNames`;
+unreadable scalars stay null and are never fabricated. Pure TIA-free `IoLogicalAddressFormatter`
+(bit/byte/word/dword parse + format with strict alignment and casing/whitespace normalization,
+rejecting `%M`/DB/symbolic-only) and `IoTagMatcher` (exact normalized interval + I/O-area equality,
+no overlap or first-match fallback, multiple tags per channel) live in `TiaMcpServer.Contracts`.
+
+The worker reads `DeviceItem.Addresses`/`Channels` and `AddressControllers` through the typed
+Openness API (present in the CI stubs), reads the dynamic `ChannelAddress`/`ChannelWidth`/`Context`
+attributes through guarded `GetAttribute`, resolves the PLC deterministically (exact `plcName`, or
+the single PLC when omitted), builds the tag index once per selected PLC via `TagTableReader`, and
+matches tags only when the controller association deterministically names the selected PLC — never
+across controllers. The payload contract validates every non-null collection and nested object
+inside `ioDetails` and rejects an explicit null collection as `protocol_error` without echoing the
+payload. FakeWorker scenarios, a separately authorized read-only live acceptance run, and the full
+I/O-map test surface were added. Full suite green at this tip: 2136/2136.
+
+## Opt-in hardware configuration pagination - DONE 2026-08-29
+
+`read_hardware_config` now has an opt-in paged path selected only by `pageSize` or `cursor`; the
+unpaged canonical request, worker method, and output remain unchanged. The public sequence counts
+stable devices followed by stable subnets, with separate arrays and exact totals. Host-process
+HMAC cursors bind filters, resolved project, bound/unbound host snapshot, worker session, candidate
+snapshot, and offset; continuation calls reuse the envelope-only worker session identity and can
+remain explicitly unbound.
+
+The worker enumerates the complete descriptor set before materializing a bounded window. The host
+strictly decodes that typed evidence and projects the largest complete canonical prefix at or below
+60,000 characters; the ordinary 180,000-character batch budget remains independent. Oversized
+diagnostics or a first oversized entity become bounded omissions with no offset advance. Entity
+subjects are all-or-nothing: the full approved subject is retained only when it fits.
+
+Offline contract and FakeWorker coverage includes exact reconstruction, duplicate names, nested
+diagnostics, trimming/resume behavior, cursor tamper/filter/binding/session/snapshot/offset
+failures, malformed worker payloads, process-key invalidation, and byte-for-byte unpaged
+equivalence. A separately authorized read-only acceptance procedure was contract-tested but was
+not executed against live TIA Portal V21 before its removal; live pagination acceptance remains
+unverified.
+
+## PR 6 project-tree safety scopes — mandatory live acceptance completed (2026-09-06)
+
+Typed exact project-tree selectors now cover `create_block`, `create_block_group`, and
+`delete_block_group`. They preserve PLC-global versus Software Unit ownership, validate canonical
+parents and ancestors, bind only relevant requested-name occupancy, include authoritative XML for
+occupied or descendant blocks, and fail closed on malformed or conflicting worker payloads.
+Identical selectors share a read only within one preview or apply phase and expand back into the
+original operation order; apply always reads fresh state under the pinned project binding.
+
+The
+[guarded live acceptance report](superpowers/acceptance/reports/2026-09-01-pr6-project-tree-safety-scopes-live.md)
+records successful Inventory, Preview, and authorized Apply/restoration/compile evidence against
+the exact startup-bound TIA Portal V21 project for both PLC-global and Software Unit fixtures.
+Occupied-block content, descendant-block content, requested-name occupancy, and relevant
+descendant membership drift rejected stale tokens with `state_changed`; unrelated sibling-tree
+drift preserved the original token. Six restoration hash pairs per owner matched, all 52
+record-level byte comparisons per owner passed before compile, and six compile checks per owner
+reported `Success` with 0 errors and 0 warnings.
+
+Repository-auditable contracts, implementation, tests, harness, and this report remain distinct
+from the redacted, git-ignored live observations. No save or persistence behavior, plant
+acceptance, or physical-hardware commissioning is claimed.
+
+Remaining deferrals are unchanged:
+
+- Broader snapshot narrowing: unchanged and out of scope.
+- `start_plc` / `stop_plc`: unchanged and out of scope.
+
+## PR 5 tag-operation safety scopes — mandatory live acceptance completed (2026-09-05)
+
+Typed exact selectors now cover all eight tag/table/user-constant write operations with relevant
+cross-kind/name/address collision probes, phase-local read deduplication and ordered expansion,
+fresh apply reads, and no cross-phase cache. Focused tests passed 83/83, current-state FakeWorker
+tests 24/24, harness contracts 7/7, the full offline suite 2691/2691, and both stub and real V21
+builds completed with 0 warnings/errors.
+
+The [guarded live acceptance report](superpowers/acceptance/reports/2026-09-01-pr5-tag-operation-safety-scopes-live.md)
+records successful `PreviewOnly`, `DriftAndRestore`, and `ApplyAndRestore` modes against the exact
+disposable copy. Same-object and relevant name/address collision drift rejected stale tokens with
+`state_changed`; unrelated sibling drift preserved the original target token; one unchanged-token
+apply succeeded and observed `heaterStages=4`; no-save discard preserved the saved baseline; and
+the clean source project was restored open. The initial sandbox visibility failure and two
+deterministic lifecycle binding conflicts occurred before mutation and were not uncertain writes.
+
+Deferred scope remains explicit: multilingual per-tag comment binding; public `list_tag_tables`
+completeness changes; broader snapshot narrowing; Software Unit namespace-aware collisions; and
+PLC `start_plc` / `stop_plc` safety work. This bounded evidence is not plant acceptance.
+
+## PR 3 update_tag exact safety snapshot — mandatory live acceptance completed (2026-09-05)
+
+The missing external-flag safety-state gap for `update_tag` is closed in the offline contract,
+worker, FakeWorker, and registered write path: a strict exact-target snapshot captures resolved
+PLC/table/tag identity and mutable values, requires the observed worker session identity, and
+rejects a requested unreadable external flag before a preview token can be issued. The legacy
+best-effort public `list_tag_tables` response is intentionally unchanged until PR 5.
+
+The guarded disposable-copy run is recorded in the
+[`PR 3 update_tag safety snapshot acceptance report`](superpowers/acceptance/reports/2026-09-01-pr3-update-tag-safety-snapshot-live.md).
+The mandatory live V21 read, preview, authorized `ExternalVisible` flag-only drift, stale-token
+`state_changed` rejection, and restoration all passed. The optional unavailable-target probe was
+`NOT RUN` because no distinct target exposing an unavailable flag was established. The flag was
+restored to its original value, but TIA retained `isModified = true`; no save, close, or discard
+was performed.
+PR 5 selector narrowing, multilingual per-tag comment binding, and PLC `start_plc`/`stop_plc`
+work remain deferred.
+
+## PR 1 explicit MCP tool annotations — live acceptance completed (2026-09-01)
+
+The registered 4-tool read-only and 14-tool read-write MCP surfaces now expose the approved
+client-facing write metadata, with the server-enforced preview/token/apply safety model unchanged.
+The separately authorized, non-mutating host-level harness completed with exit code `0` against
+the current-branch read-only and read-write hosts. Its live evidence is recorded at
+[`docs/superpowers/acceptance/reports/2026-09-01-pr1-explicit-mcp-tool-annotations-live.md`](superpowers/acceptance/reports/2026-09-01-pr1-explicit-mcp-tool-annotations-live.md).
+
+This completion applies only to the exact host, attached TIA Portal session, and disposable
+project documented in that report. Offline, stub, FakeWorker, and static harness-contract evidence
+remain separate development evidence; neither evidence class substitutes for the other. PLC
+`start_plc` and `stop_plc` remain deferred and out of scope.
+
+## PR 2 registered-tool delegation — live acceptance completed (2026-09-01)
+
+`Program.cs` now registers the split `ProjectReadTools`, `ReadBatchTools`,
+`ProjectWriteTools`, and `WriteBatchTools` owners directly. The legacy
+`ProjectLifecycleTools` and `BatchTools` types remain compatibility wrappers only.
+The separately authorized preview-only harness completed against the real TIA Portal V21 host,
+proving that all nine required registered tool names were present, a successful
+`execute_read_batch` baseline read, and token-bearing generic-batch and lifecycle previews without
+applying either token. The harness filters `tools/list` to the required-name allowlist; this is not
+a claim that the complete read-write host surface contains only nine tools. The
+sanitized live evidence is recorded in the
+[`PR 2 registered-tool delegation acceptance report`](superpowers/acceptance/reports/2026-09-01-pr2-registered-tool-delegation-live.md).
+
+This completion does not authorize or complete compatibility-wrapper deletion. PLC `start_plc`
+and `stop_plc` safety hardening also remains deferred. No apply, project save, PLC mode change,
+production acceptance, or plant acceptance is claimed.
+
+## PR 4 bounded structured preview diffs — live acceptance completed (2026-09-05)
+
+The [PR 4 acceptance report](superpowers/acceptance/reports/2026-09-01-pr4-structured-preview-diff-live.md)
+records completed live Preview and authorized Apply/restore/compile acceptance against a disposable
+TIA Portal V21 project. The first Apply target exposed TIA canonicalization from `T#1s` to `T#1S`:
+its byte-identity check failed, and guarded no-save close/reopen cleanup recovered the clean disk
+state. A read-only-selected UDT target then passed Preview, temporary Apply, restoration with
+byte-identical public re-exports, and compile with zero errors and zero warnings across two PLCs;
+final guarded no-save close/reopen cleanup returned the project to `isModified=False`.
+
+The close/open lifecycle operations were cleanup and recovery only, not PR 4 feature acceptance.
+The report does not claim plant or production acceptance, disk project-byte identity, saved-project
+acceptance, or semantic equivalence beyond the exact exported-text checks performed.
+
+## Project-tree v3 public cutover — offline implementation completed (2026-09-08)
+
+The sole public `browse_project_tree` surface now uses the v3.0 canonical envelope, typed
+`startSelector`, flat parent-first nodes, complete-node pagination, authenticated process-local
+cursors, and bounded immutable snapshots. The v2 bare nested array, `startPath`, project-tree
+`deviceName`, and `details.Path` contracts were removed atomically. Cursor-free calls make one typed
+worker observation; continuations use the cached snapshot and make zero worker calls.
+
+Offline tests cover strict input and worker decoding, selector ambiguity and failures, canonical
+text/structured equality, snapshot/cursor authentication and bounds, page projection, public schema,
+and legacy rejection. The maintained read-only PowerShell harness also has a static source contract
+and parser gate. At the time of this offline entry, the harness had not been executed and no live
+TIA Portal project had been opened or attached for it. The subsequent accepted live result is
+recorded separately below; the deeper resolver optimization remains open near the top of this log.
+
+## Project-tree v3 read-only live acceptance — DONE 2026-09-12 (Issue #32)
+
+The user accepted the [combined offline and live evidence](superpowers/acceptance/reports/2026-09-06-issue-32-project-tree-v3-live.md):
+Fixture A's selected-Device median improved by 54.44%, and Fixture B supplied additional 62.57%
+median-reduction evidence plus complete 890-node full and 804-node selected trees over five pages
+each. Eight live continuations, canonical/size/structure checks, deep-leaf equivalence, and exact
+missing/invalid selector categories passed. The accepted one-initial-worker/zero-continuation-worker
+requirement combines offline integration/source proof with observed live paging, not live IPC counts.
+
+The live `target_ambiguous` check was explicitly WAIVED, not passed: the user's acceptance ruling
+recognizes that TIA name uniqueness prevents the required duplicate-name fixture through normal
+engineering. Raw harness failures at that fixture guard and the first late-approval timeout remain
+in private ignored evidence. Project and selector identities are omitted from tracked documentation
+at the user's request. No project save, mutation, PLC control, deployment, or plant acceptance is
+claimed. The deeper direct resolver and depth-pruned walk remain deferred.
+
+## .NET 10 host migration — offline implementation completed (2026-09-13)
+
+The modern side of the two-process runtime now targets `net10.0`: the MCP host, tests, and
+FakeWorker use the stable .NET 10 SDK boundary, while the shared contracts remain
+`netstandard2.0` and the Siemens Openness worker remains `net48`. The direct dependency set is
+`ModelContextProtocol` 2.2.0, `System.Text.Json` 10.0.12 on both legacy-boundary projects,
+`Microsoft.SourceLink.GitHub` 10.0.401, and `Microsoft.Extensions.Hosting`,
+`Microsoft.Extensions.DependencyInjection`, `Microsoft.Extensions.Logging`, and
+`Microsoft.Extensions.Logging.Abstractions` 10.0.12. SourceLink resolves
+`Microsoft.Build.Tasks.Git` 10.0.401; the worker explicitly retains `System.ValueTuple` 4.6.2 and
+packages exactly one required `System.IO.Pipelines.dll` companion.
+
+The framework-dependent global-tool package was built and verified under
+`tools/net10.0/any/`; the separate `win-x64` release was published self-contained and single-file.
+Offline gates passed a serial Release build with the Siemens reference stubs, the focused package
+and workflow tests, the strict NuGet package verifier, and file-by-file inspection of both release
+layouts. The verified artifacts contained the expected worker payload and no Siemens DLLs. No live
+TIA Portal harness or test was run, so this entry makes no live-runtime, project, device, or plant
+acceptance claim.
+
+## Issue #30 PLC block header metadata — offline implementation completed (2026-09-13)
+
+- `browse_project_tree` block nodes now expose non-blank `HeaderAuthor`, `HeaderVersion`,
+  `HeaderFamily`, and `HeaderName` values through typed `PlcBlock` properties.
+- Producer, strict-decoder, FakeWorker IPC, cached continuation, canonical MCP, budget, Release
+  build/test/coverage, and package-content gates passed. Maintained docs distinguish reported
+  metadata from verified provenance.
+- Live TIA Portal V21 acceptance remains a separate read-only authorization gate.
+
+## Issue #30 PLC block header metadata — read-only live acceptance completed (2026-09-17)
+
+The separately authorized `BlockHeaders` harness passed against the already-open TIA Portal V21
+project using a fresh current-main baseline and a real-V21 candidate build. Each side completed
+three 123-node snapshots, with identical tree identity, canonical text/structured equality, valid
+ordering, and completed pagination. This fixture fits one page at `pageSize=200`; it does not add
+live continuation coverage. Exact user, system, software-unit, and blank-header cases verified all
+four header fields, engineering-name/`HeaderName` divergence, system-block identity, software-unit
+membership, and omission of the declared blank author/family/header-name fields.
+
+The accepted cases recorded these exact observations:
+
+- User block `MotorSoftstart`: `HeaderAuthor=LCZ`, `HeaderVersion=0.0.0.0`,
+  `HeaderFamily=Motors`, `HeaderName=3`.
+- System block `G7_RT_Plus_1_V6`: `IsSystemBlock=true`, `HeaderVersion=0.1`.
+- Software-unit block `HartCommandsRdWrInRun`: `HeaderAuthor=Codex`, `HeaderVersion=0.1`,
+  `HeaderFamily=Communication`, `HeaderName=1`, `SoftwareUnit=Test_SU`.
+- Blank-header block `StateMachine`: `HeaderVersion=0.1`; `HeaderAuthor`, `HeaderFamily`,
+  and `HeaderName` absent.
+
+Typed-version observations were `0.0.0.0` for the selected user block and `0.1` for the selected
+system, software-unit, and blank-header blocks. In particular, the blank-header case still reported
+`HeaderVersion=0.1` while omitting `HeaderAuthor`, `HeaderFamily`, and `HeaderName`. These are
+observations of this project and build, not universal Siemens defaults or guarantees.
+
+Ignored evidence under `artifacts/issue-30-live-20260917/` contains the strict final manifest,
+`main-baseline-final.json`, `candidate-final.json`, raw responses, host/worker SHA-256 provenance,
+and timing/size comparisons. Baseline/candidate median times were 893.4/1034.7 ms; the candidate's
+first read took 84.2 seconds, followed by 1034.7 and 848.3 ms. Median initial-response sizes were
+17463/19141 characters. No performance threshold was applied. An earlier candidate deployment
+timed out before a browse response; its evidence was retained, and the successful retry followed a
+serial rebuild against the installed real V21 assemblies. These observations do not establish the
+cause of the earlier timeout or the first-read delay.
+
+The harness ran with `--read-only` and invoked only `browse_project_tree`. No save, compile,
+import/export, project mutation, PLC control, or plant acceptance is claimed.
+
+## Network Phase 4 current-revision public live acceptance — bounded PASS (2026-09-24)
+
+After the 2026-09-23 connected-delete failure, the user confirmed the disposable copy was closed
+without saving and reopened, then logged into safety. On the frozen PR 1 candidate, the guarded
+public MCP harness passed Inventory, Preview, all eight Ethernet/PROFIBUS lifecycle operations
+(including both originally connected deletes), and a separate final Inventory. The final read
+observed zero subnets and the same 81 aggregate hardware devices. Portal reported unsaved changes;
+the harness did not save, compile, or download. The root count of 10 comes from lifecycle results
+without an independent pre-Apply baseline, and retained-device identities and node/IO-system
+attributes were not independently read back. The earlier failure remains in the
+[live report](superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md).
+
+The executable repair commit had passed full Debug and Release coverage gates. This docs-only
+candidate re-pin passed 298 focused tests and a normal-user Debug real-reference host build; a
+sandbox full run returned 3094/3098 with four environment failures. The user directed this turn
+to the live gate, so host retry, Release, and coverage were not repeated on the re-pinned HEAD.
+
+## Network Phase 4 contract repair — static implementation completed (2026-09-23)
+
+Focused automated gates passed for four contract repairs: update/delete now require exact ordinal
+`target.kind: "subnet"`; all four raw success members, including `networkDeviceCount`, are required
+before typed normalization; late zero/multiple worker matches return `postcondition_failed`; and
+delete resolves, type-checks, and captures a nonblank name from one transaction-local subnet object
+before `Delete()`. The subsequent failed attempt and successful rerun are recorded in the completed entry above.
+
+## JSON contract Phase 1b required-member enforcement — live acceptance completed (2026-09-29)
+
+One worker-payload reader in `CanonicalJson` now enforces required members for the Network,
+hardware-page, project-tree, and rebind-state decodes. It replaces the hand-written JSON-shape
+layers in the first three contracts. The seven network roots and two worker probes now write
+explicit nulls, and `LegacyNullOmissionReason.RequiredMemberEnforcement` is gone.
+- `NetworkPayloadContract.cs` went from 1268 to 831 lines, and `HardwarePagePayloadContract.cs`
+  from 258 to 175.
+- The builds are clean, and the full suite passed 4199/4199, up from 3858.
+- One behavior loosens, as documented: an explicit `ioDetails: null` on a read that did not
+  request IO details is now accepted.
+- A payload the reader rejects logs `validators=Decode` instead of a validator name.
+
+The branch build `3.0.1-local.33.g4de84ef` was installed as the `tia-mcp` global tool and run
+against TIA Portal V21 on a disposable copy of `SimpleProject`, 25 calls in all.
+- **Reads:** the hardware configuration (default, IO details, tag matches, and three pages), the
+  catalog search, the object list (two pages), four inspections including a `kind: "null"`
+  attribute, and the project tree (two pages plus a start selector).
+- **Writes:** `open_project`, then a `network_write` preview and apply for each of
+  `create_subnet`, `add_network_device`, `configure_network_device`, `update_subnet`, and
+  `delete_subnet`.
+
+No call returned `protocol_error`. Every response had its declared shape, and no contract changed.
+The `NetworkDeviceCreator` null fallback added by the final review did not fire, because Openness
+returned the device name and type, so that branch is verified by the build only. The copy was
+left with unsaved changes; nothing was saved, compiled, or downloaded. The per-call record is in
+the [plan's acceptance notes](superpowers/plans/2026-09-28-json-contract-phase1b-required-members.md#acceptance-notes-live-2026-09-29).
+
+## Write-safety redesign Phase 1 foundation — completed (2026-09-29)
+
+The guarded write pipeline (`TiaMcpServer/Safety/Pipeline/`) now exists beside the token flow, and
+`execute_read_batch` content reads return a format-tagged `contentHash`. No registered write tool
+uses the pipeline yet; Phases 2–4 move the tools onto it.
+- The full suite passed 4314/4314. The host builds clean; the solution build was blocked only by
+  running `TiaMcpServer` processes locking the output DLL, not by a compile error.
+- **Spike (Appendix A of the spec):** elicitation reached the user in Claude Code, Codex (default
+  approval), and MCP Inspector; Codex unrestricted mode answers `decline`, so it fails closed. The
+  `anthropic/requiresUserInteraction` marker works only in Claude Code, so it was dropped.
+- The spike probes, the marker helper, and their tests are deleted. `UserConfirmation` stays for
+  Phases 1b and 2.
+
+## Write-safety redesign Phase 1b access modes — offline acceptance completed (2026-09-30)
+
+At that checkpoint the presets distinguished read-only observation (4 tools), read-write
+in-project edits/compilation (8), and full lifecycle/PLC runtime control (14). The Oct3 lifecycle-tier
+and binding delivery below supersedes those counts and lifecycle permissions; startup and installer
+defaults remain read-write and read-only respectively.
+
+- Discovery uses the same registration helper in production and protocol tests. Host denial
+  precedes binding, snapshots, token handling and worker activity; worker authorization is
+  independent. Tests cover hidden lifecycle calls, mixed PLC-control batches, direct previews,
+  initial attachment without cross-project worker dispatch, and full-mode launch/restart.
+- That checkpoint introduced an immutable default-on confirmation singleton and parser; the
+  subsequent mode-derived confirmation delivery removed both. Legacy Network/batch tokens remain.
+- Fresh Release stub solution build passed with 7 existing xUnit2031 analyzer warnings and no
+  errors. The complete offline suite passed **4414/4414**, with no skips, using the current CI
+  coverage settings and serialized collections. Scoped line coverage was **93.76%** (9833/10487),
+  above the **80%** gate; branch coverage was 85.48%. The existing threshold script passed.
+- The direct/transitive NuGet vulnerability check reported no vulnerable packages in any of the
+  five projects using the current sources. Changed-document links and README absolute links
+  passed local validation. No dependency or version change was required.
+- Independent preset, enforcement, CLI and whole-branch reviews were used. Their fixes include
+  null-method denial, lifecycle post-write status classification, stronger dispatch assertions,
+  serialized environment tests, and production DI coverage. Static dispatch/catalog inspection
+  matched all 56 worker methods; unknown operations remain denied in every mode.
+- No live TIA operation, client-registration change, package tag, release, push or merge was
+  performed. Stub/FakeWorker evidence covers policy, protocol and IPC behavior only.
+
+The [implementation record](superpowers/plans/2026-09-30-write-safety-phase1b-access-modes.md)
+contains the completed checklist and execution decisions; the [design delivery note](superpowers/specs/2026-09-29-write-safety-redesign-design.md#6-delivery-phases)
+records the Phase 2 confirmation handoff.
+
+## JSON contract Phase 2 standalone tools — implemented, live acceptance pending (2026-09-30)
+
+`get_project_status` and `compile_check` now advertise concrete output schemas and deliver one
+canonical document in text and `structuredContent`. Version `1.0` uses a typed single result
+with `status`, `value`, `failure`, and `omission`. Status includes the full metadata model with
+explicit nulls. Compilation success means compilation passed; compiler errors and unavailable
+states retain their report with `success:false`, `error:null`, and MCP `isError:false`.
+
+The dedicated `ProjectStatusResultInfo` root keeps lifecycle/probe bytes unchanged. The compile
+root writes nulls, while its nested import envelope retains its own null policy. Strict worker
+decoding precedes whole-value omission at 60,000 canonical characters; the complete document is
+capped at 180,000. Host-only failure provenance distinguishes an attempted operation from
+identity rejection before dispatch. Compilation authorization precedes its binding gate.
+
+Focused offline verification passed 244 tests covering payload validation, boundaries,
+metadata, compiler producer behavior, compatibility and real SDK schemas/discovery/calls. The
+[implementation plan](superpowers/plans/2026-09-30-json-contract-phase2-standalone-tools.md)
+tracks the final solution, coverage and independent-review gates. The [offline validation report](superpowers/acceptance/reports/2026-09-30-json-contract-phase2-offline-validation.md)
+records the passing Release stub build, 4,513 passing tests, 93.94% line coverage, and two
+independent reviews without findings. Live V21 producer compatibility
+requires separate authorization for a disposable fixture. No package version/tag or remote
+publication is part of this migration step; Phase 3 remains a separate successor.
+
+## JSON contract Phase 3 / write-safety Phase 2 — offline qualification completed (2026-10-01)
+
+At that checkpoint the six lifecycle tools gained guarded single-call writes, concrete structured
+schemas, typed mutation/verification outcomes, and one canonical audit record per call. All seven
+lifecycle guard IDs were covered. That source used configurable elicitation and an agent
+confirmation-list fallback; the Oct3 delivery supersedes those confirmation semantics.
+Hard blocks and dry runs never elicit. Binding preparation preserves the exact source/destination,
+ownership, recovery and save-as transitions, with a fresh post-acceptance state check. Client-returned
+acceptance does not prove a human saw a dialog.
+
+Attempted mutation/verification failure retains typed evidence with `success:false`, `error:null`,
+and MCP `isError:false`; pre-mutation rejection retains top-level error and `isError:true`.
+Whole-value and document budgets are 60,000/180,000 canonical characters, including large effects
+and guard metadata. Omission markers retain guard identity, acknowledgement, phase, and verdict;
+missing evidence calls for status/artifact inspection, never mutation replay. Lifecycle wrapper/token
+paths are retired; Network/batch tokens remain active.
+
+The qualified code/test candidate is `8f0e26f83db4faf6cd243fef7489f6419db3925b`. The final host Release
+suite passed **4,640/4,640**, with no failures or skips. The existing **80%** line-coverage gate passed
+with Cobertura line rate **0.9386** (9,997/10,650 lines), branch rate 0.8578. Serial Release stub and
+installed-V21 reference Rebuilds passed with zero errors and seven pre-existing xUnit2031 warnings.
+Independent review's P2 metadata-cap finding was reproduced and fixed with RED→GREEN evidence;
+the final fix diff has no unresolved findings. Package-cache and child-build environment corrections
+were command-only, without production-source or dependency-version changes.
+
+The [implementation record](superpowers/plans/2026-09-30-json-contract-phase3-lifecycle.md) and
+[validation report](superpowers/acceptance/reports/2026-10-01-json-contract-phase3-offline-validation.md)
+record the offline gates and diagnostic runs. The separately authorized
+[2026-10-01 live validation](superpowers/acceptance/reports/2026-10-01-json-contract-phase3-live-validation.md)
+passed for that source; these offline/reference checks alone never proved live behavior. The
+later tier/confirmation/binding change invalidated that frozen evidence for its new candidate;
+Task13 replaced it as recorded below. The earlier passing evidence is retained as history.
+
+## Lifecycle tiers and bind_project — implemented, live acceptance completed (2026-10-03)
+
+The tool counts are 5/15/15. `bind_project` selects an already-open project in every mode, with
+force for a different configured or previous binding; reads never bind/switch, and only
+open/create can open projects. Worker ownership is lost on detach. Read-only never opens,
+creates, saves or closes. Doctor warns for unbound writable sessions; project-tree cursors reject
+binding changes, including switching away and back. Each actual read-write lifecycle call asks
+once through form elicitation; full uses policy without server elicitation. Block guards stop every
+mode and dry runs never mutate/prompt. Old startup confirmation switches and agent confirmation
+lists were removed. Audit v2 records confirmation by `user`, `policy`, or `none`.
+
+Phase A shipped separately at `85aec97`; the combined frozen source is
+`3bb504b4647cdd57677323eb44aac3305a33aafd`. Its offline checkpoint passed **4,946 tests** with
+**93.24%** linked host/contracts line coverage, above the 80% gate; this excludes live Siemens code.
+The [Oct3 report](superpowers/acceptance/reports/2026-10-03-lifecycle-tiers-bind-project-live-validation.md)
+replaces Oct1 acceptance for the new candidate: all three functional mode groups passed, six
+lifecycle operations and seven guards were exercised in each writable mode, 27 full and 42
+read-write audit v2 records matched canonical responses/hashes, and read-only returned five tools
+and preserved both project states through binding/cursor checks. Artifacts, restoration and
+graceful host/worker exit evidence are bounded by that report. The maintainer subsequently reported
+no new TIA dialog in read-only mode, completing Task13's separate human observation. Their
+conclusion that the dialog appears once for an unchanged worker is not a general runtime guarantee:
+the recorded native worker changed from PID25148 in read-write to PID28428 in read-only.
+Task14's current documentation/spec updates are complete. Programmatic acceptance remains distinct
+from recorded human observations; no functional production fix or live replay was required.
+No release/tag, Network/batch retirement, headless/Multiuser, crash/timeout, archive retrieval,
+PLC/plant acceptance, plugin update, or remote publication is claimed.
+
+## Multiuser PR 1 reference and contract foundation — implemented (2026-10-03)
+
+Replaced opaque broad compile references with reviewed minimal declarations under
+`reference-stubs/`, retaining the two assembly names, version `21.0.0.0`, and public-key token
+`29bfe5fdf4ba5d3b` through a public-only delay-signing key. The former references already
+contained Multiuser types. A locked compile-only probe checks the intended API surface;
+default verification checks identity and canonical raw-source-hash metadata without updating
+tracked artifacts, while explicit `-Update` replaces only the two known DLLs. Scoped CRLF
+attributes preserve raw-byte provenance across clean checkouts; whole-PE hashes remain
+diagnostic across compiler patch versions.
+
+Passive contracts write explicit nulls and remain Siemens-free. No public tool, worker operation,
+binding integration, `.als21` lifecycle behavior, or permission was added. Generated stubs remain
+compile-only and excluded from runtime output; all Siemens binaries remain excluded from
+packages, while the net48 worker uses installed real assemblies. Stub, installed-reference,
+contract, package, and live evidence remain distinct. The final qualification and independent
+review gate acceptance of this foundation; internal context integration remains PR 2's dependency.
+See [building from source](development/building.md#generated-openness-references) for the procedure.
+
+## Multiuser PR 2 active project context — offline qualified (2026-10-05)
+
+The worker session now stores one typed active context and lifecycle owner, with a common
+`ProjectBase` engineering root and a standalone-only bridge for existing content services.
+Selection, live identity/generation, ownership, explicit lifecycle resolution, and cleanup
+are covered by source-linked boundary tests. No production caller activates local/server
+contexts, and no public `.als21` or Multiuser operation is enabled.
+
+Continuation repaired four stale source assertions in three test files without changing
+production behavior. The final serialized suite passed **5036/5036**, with **93.96%** line
+coverage above the existing 80% gate. Reference provenance/drift checks, serial stub build,
+installed-V21 solution and API-probe compilation, and package/doctor exclusion passed.
+Both compile modes had zero warnings/errors; package verification found one canonical
+15-file worker payload and no Siemens DLLs. Independent review found no Important/Critical
+production issue. See the [qualification/fixture record](superpowers/acceptance/reports/2026-10-05-multiuser-pr2-active-project-context-live.md)
+for preserved failed-run evidence, exact retained real-reference hashes, and disposable scope.
+Offline changes are committed with explicit user authorization. Current-candidate standalone
+live acceptance and restoration remain open; Issue #65 is not complete.
+
+## Multiuser PR 2 standalone live accepted (2026-10-05)
+
+After explicit exact-fixture authorization, frozen candidate `a47bf0d` passed bounded live
+standalone qualification: 131 captured tool calls, including 64 lifecycle calls across
+read-only/read-write/full. Canonical documents and all lifecycle audit hashes matched.
+Selection/cursor continuity, six lifecycle previews/applies, decline/cancel, ownership loss,
+dirty-source/last-client blocks, external identity changes, typed attempted failures and
+restoration were observed. A/B are clean and open at their original paths; H was saved with
+its original comment, independently reopened clean, then closed. Test helpers exited.
+
+The [acceptance report](superpowers/acceptance/reports/2026-10-05-multiuser-pr2-active-project-context-live.md)
+retains installed hashes, private evidence locations, deviations and failures. Root-project
+comments substituted for PLC edits; external changes used an independent Openness client;
+form acceptance was scripted. Independent review found no Important/Critical behavior issue.
+No production change or expensive suite replay followed these documentation-only results.
+Public Multiuser operations and Issue #65 remain open.
+
+## Multiuser PR 3 discovery and inventory — offline qualified and live accepted (2026-10-06)
+
+`bind_project` retains default/null binding and adds six explicit inspection actions without
+changing 6/16/16 discovery. Exact raw-key selectors, persistent Portal-only attachment, local
+foreign-PID refusal, genuine identity-loss invalidation, canonical typed payloads and whole-value
+budgets are covered offline. Current-machine/current-user sessions and non-atomic lock observations
+remain bounded; ALS21/session/content/marking/mutation delivery and Issue #65 completion stay open.
+
+Frozen code `29468ba` passed 5,536/5,536 serial tests with coverage; unchanged 80% line gate passed
+at 93.83%. Installed V21 compile-only probe/solution and source-reference drift passed; existing
+Step7 `Tags.cs:112` CS0108 remains deferred. Local package `3.0.1-local.316.gfba3cc7` passed layout/leak
+checks and includes the maintained README. The [offline report](superpowers/acceptance/reports/2026-10-06-multiuser-pr3-offline-validation.md)
+records exact commands, scoped/changed coverage, hashes and limits. Documentation review and
+scoped session-ID clarification re-review passed; final whole-branch review is separate.
+Task 5 live acceptance was subsequently finished and passed by maintainer decision on 2026-10-06.
+The [live report](superpowers/acceptance/reports/2026-10-06-multiuser-pr3-live-verification.md)
+records 73 installed calls and retains unexecuted cases as non-blocking evidence limitations.
+## network_write live defects — fixed and live accepted (2026-10-05)
+
+Branch `fix/network-write-live-defects` (`d23b2d6..3642062`) fixed the defects a live
+`network_write`/`network_read` run exposed. No contract version bump.
+
+- Identity comparisons of live Openness objects use `object.Equals`, not `ReferenceEquals`: Openness may
+  return distinct wrappers for one object. `list_network_objects` nodes are selectable again,
+  `read_hardware_config` subnet connection evidence is complete with qualified node identities, and
+  connected `delete_subnet` is no longer always blocked by `network_state_unverifiable`.
+- `add_network_device` verifies the created item among top-level device items only, so a head
+  module with a same-named child passes; a blank/whitespace `deviceItemName` is `validation_error`.
+- Host preflight selector misses are `target_not_found`/`target_ambiguous` (were
+  `postcondition_failed`); a blank or unsupported subnet `NetworkType` is `target_kind_unsupported`;
+  an unreadable snapshot is `worker_operation_failed`. `postcondition_failed` now means late
+  worker-side drift or failed postchecks only.
+- Verification `identity` is a typed object with an `interfacePath` segment array and explicit
+  nulls; `finalChecks[]` carry `kind`, typed `subject`, `field` and `operationId` instead of
+  interpolated names.
+- IoSystem effects and checks use scalar `IoSystemSubnet`/`IoSystemNumber`; applied/skipped
+  settings keep `IoSystem`. No nested JSON string remains.
+- Skipped configure settings get a final preservation check against the pre-write value.
+  `verification.success` covers evidence only, so `verification.success:true` with root
+  `success:false` is by design.
+- `read_hardware_config` no longer reads a nonexistent `DeviceItem` `Address` (`items[].address`
+  is always null; use `ioDetails.addresses`), no longer reports null type identifiers, and
+  deduplicates `messages[]`. `deviceName` is documented as the station/root device name.
+- Preview `currentSettings` report real Openness access through node/subnet inspection (fallback
+  `modeled`/`unknown`). New `changes.pnDeviceNameAutoGeneration` is written before `PnDeviceName`;
+  a `pnDeviceName` request on an auto-generating node fails planning with `validation_error`
+  unless it is set to `false`.
+
+Live acceptance on TIA Portal V21 (`SimpleProject_copy`, build from `3642062`) confirmed all of
+the above: 15/15 nodes selectable; a connected delete applied with `subnetAbsent`,
+`affectedNodesPreserved` and `affectedConnectionsRemoved` passed; `add_network_device` of an
+ET200SP IM 155-6 PN ST passed; `NOPE-99` returned `target_not_found`; typed identity and
+`finalChecks[]`; an IoSystem attach to `PN/IE_1` IO system 100 passed its
+`IoSystemSubnet`/`IoSystemNumber` checks; an invalid IP produced a passed `Address` preservation
+final check; a single-device read returned an empty `messages[]`. V21 reports
+`PnDeviceNameAutoGeneration` as a `readWrite` Boolean (`true` on the PLC) and `PnDeviceName` as
+`readOnly` while it is true; opting out with `false` and then writing the name applied and
+verified. Deferred items are under "Open: network_write live-defect follow-ups" above.
+
+## plc_write and token-core retirement — live-accepted 2026-10-07 (PR B)
+
+`plc_write` replaced `preview_write_batch`/`apply_write_batch` on the guarded single-call pipeline:
+14 operations, `content` plus `expectedContentHash`, block/info guards only, no prompt in any mode,
+one audit v2 record per call. PLC run/stop, the safety-token core, `WriteSafetyTooling`,
+`SafetyRead` and the legacy write audit were removed; tool counts are 6/15/15. Offline qualification
+and live acceptance in read-write and full are in the
+[validation report](superpowers/acceptance/reports/2026-10-07-plc-write-validation.md).
+
+- **Pipeline fix `9886a23`:** a re-planned dependent item's repeated guard is reported once. The
+  defect had been on `main` since `028108b` (the guarded pipeline); `plc_write` found it live.
+
+## Write-safety Phase 5 cleanup — completed 2026-10-07 (release excluded)
+
+Removed the last token-era test and FakeWorker leftovers (the unused state-drift scenario, token
+wording, two `confirm`/token read-only bypass tests, a retired snapshot method row) and
+renamed `NetworkIntrospectionSafetySnapshotTests` to `NetworkHardwareConfigDeterminismTests`. No
+file outside `docs/superpowers/` names the retired token argument any more. Major version, release notes, agent migration note and tag stay open for the maintainer
+([redesign spec](superpowers/specs/2026-09-29-write-safety-redesign-design.md)).
+
+## OB creation for `create_block` (issue #75) — live-accepted 2026-10-09
+
+`create_block` with `blockType:"OB"` failed for every event class. It now creates any of 15
+event classes named by `obEventClass` (a closed enum; the earlier advertised names that were not real
+event classes are gone). The server picks the OB number from a shared table and rule in
+`TiaMcpServer.Contracts`, so the previewed and executed numbers agree unless another OB takes the number in between (the result `number` is authoritative); `plc_ob_singleton_exists`
+(block) stops a duplicate singleton in `dryRun` and in actual runs; results carry `number` and
+`obEventClass`. STL FB/FC/OB creation was fixed in the same generator (STL rejects
+`SetENOAutomatically`). Commits `a05cfc5`..`33058d8`; live acceptance passed with no defects, see the
+[report](superpowers/acceptance/reports/2026-10-09-ob-creation-live-acceptance.md) and the
+[spec](superpowers/specs/2026-10-08-ob-creation-design.md). Deferred items are under "Open:
+create_block OB follow-ups" above.

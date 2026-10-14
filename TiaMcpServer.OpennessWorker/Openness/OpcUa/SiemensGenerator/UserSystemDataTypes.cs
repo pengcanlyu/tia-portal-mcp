@@ -151,7 +151,7 @@ namespace TiaMcpServer.OpennessWorker.Openness.OpcUa.SiemensGenerator
             #region EXPORT USER DATA TYPE FROM TIA'S PROJECT AND IMPORT IT AS AN XDOCUMENT
 
             // Check if the user data type is consistent (the project has been compiled)
-            bool isConsistent = (bool)dataType.GetAttribute("IsConsistent");
+            bool isConsistent = (bool)((IEngineeringObject)dataType).GetAttribute("IsConsistent");
             if (isConsistent == false)
             {
                 OpcUaGenerationLog.Error("Some elements are not consistent. Please compile the project before running the Add-In.");

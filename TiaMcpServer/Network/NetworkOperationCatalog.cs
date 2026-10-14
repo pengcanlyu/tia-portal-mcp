@@ -1,5 +1,7 @@
-using TiaMcpServer.Contracts;
 using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
+using TiaMcpServer.Contracts.Network;
+using TiaMcpServer.Contracts.Safety;
 
 namespace TiaMcpServer.Network;
 
@@ -29,6 +31,7 @@ public sealed record NetworkValidationResult(bool IsValid, string Error)
 public static class NetworkOperationCatalog
 {
     public const int MaxBatchSize = 50;
+    public const int MaxOperationIdLength = 256;
     public const int MaxPageSize = 200;
     public const int MaxAttributeNames = 200;
 
@@ -55,6 +58,9 @@ public static class NetworkOperationCatalog
         ("typeIdentifier", operation => operation.TypeIdentifier is not null),
         ("deviceName", operation => operation.DeviceName is not null),
         ("deviceItemName", operation => operation.DeviceItemName is not null),
+        ("plcName", operation => operation.PlcName is not null),
+        ("includeIoDetails", operation => operation.IncludeIoDetails is not null),
+        ("includeTagMatches", operation => operation.IncludeTagMatches is not null),
         ("target", operation => operation.Target is not null),
         ("changes", operation => operation.Changes is not null),
         ("objectKinds", operation => operation.ObjectKinds is not null),
@@ -90,7 +96,7 @@ public static class NetworkOperationCatalog
             [NetworkObjectKinds.NetworkInterface] = new HashSet<string>(StringComparer.Ordinal)
                 { "kind", "deviceName", "itemPath", "interfaceName", "interfaceType", "interfaceOperatingMode" },
             [NetworkObjectKinds.Node] = new HashSet<string>(StringComparer.Ordinal)
-                { "kind", "deviceName", "itemPath", "nodeId", "nodeIndex" },
+                { "kind", "deviceName", "itemPath", "interfacePath", "interfaceName", "nodeId", "nodeIndex" },
             [NetworkObjectKinds.Subnet] = new HashSet<string>(StringComparer.Ordinal)
                 { "kind", "subnetId" },
             [NetworkObjectKinds.IoSystem] = new HashSet<string>(StringComparer.Ordinal)
@@ -103,7 +109,7 @@ public static class NetworkOperationCatalog
     private static readonly IReadOnlySet<string> ConfigureInapplicableSelectorFields =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            "itemPath", "interfaceName", "interfaceType", "interfaceOperatingMode", "nodeIndex",
+            "interfaceType", "interfaceOperatingMode",
             "subnetId", "number", "ioSystemIndex", "ioSystemName", "connectionIndex", "connectionType",
             "localConnectionName", "localConnectionId",
         };
@@ -151,7 +157,7 @@ public static class NetworkOperationCatalog
             if (!OperationPolicyCatalog.IsAllowed(mode, operation.Operation))
             {
                 errors.Add(
-                    $"Operation '{operation.Operation}' (operationId '{operation.OperationId}') is not permitted in read-only mode.");
+                    $"Operation '{operation.Operation}' (operationId '{operation.OperationId}') is not permitted in {McpAccessModeNames.ToName(mode)} mode.");
             }
         }
 
@@ -186,6 +192,15 @@ public static class NetworkOperationCatalog
             if (string.IsNullOrWhiteSpace(operation.OperationId))
             {
                 errors.Add("Each operation requires a unique operationId.");
+                continue;
+            }
+
+            // operationId is repeated in every public item and in truncation evidence. Bound it
+            // before any response construction so caller-controlled identity text cannot consume
+            // the entire per-item budget or make even the minimal omission impossible to render.
+            if (operation.OperationId.Length > MaxOperationIdLength)
+            {
+                errors.Add($"Each operationId must be at most {MaxOperationIdLength} characters.");
                 continue;
             }
 
@@ -243,9 +258,22 @@ public static class NetworkOperationCatalog
                 errors.Add($"Operation '{operation.Operation}' (operationId '{operation.OperationId}'): 'maxResults' must be 1 or greater.");
             }
 
+            // A blank item name would be replaced by deviceName on create but not in the
+            // host/worker '?? deviceName' expectations, so the verified identity would diverge.
+            if (spec.Name == "add_network_device"
+                && operation.DeviceItemName is not null && string.IsNullOrWhiteSpace(operation.DeviceItemName))
+            {
+                errors.Add($"Operation '{operation.Operation}' (operationId '{operation.OperationId}'): 'deviceItemName' must not be blank when supplied.");
+            }
+
             if (spec.Name == "list_network_objects")
             {
                 ValidateListNetworkObjects(operation, errors);
+            }
+
+            if (spec.Name == "read_hardware_config")
+            {
+                ValidateReadHardwareConfig(operation, errors);
             }
 
             if (spec.Name == "inspect_network_object")
@@ -278,7 +306,7 @@ public static class NetworkOperationCatalog
         {
             var distinctPaths = operations
                 .Where(operation => operation is not null && !string.IsNullOrWhiteSpace(operation.ProjectPath))
-                .Select(operation => WriteSafetyService.NormalizeProjectPath(operation!.ProjectPath))
+                .Select(operation => WriteProjectPaths.Normalize(operation!.ProjectPath))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             if (distinctPaths.Length > 1)
@@ -297,6 +325,7 @@ public static class NetworkOperationCatalog
         "query" => !string.IsNullOrWhiteSpace(operation.Query),
         "typeIdentifier" => !string.IsNullOrWhiteSpace(operation.TypeIdentifier),
         "deviceName" => !string.IsNullOrWhiteSpace(operation.DeviceName),
+        "plcName" => !string.IsNullOrWhiteSpace(operation.PlcName),
         "target" => operation.Target is not null,
         "changes" => operation.Changes is not null,
         "objectKinds" => operation.ObjectKinds is not null,
@@ -309,6 +338,38 @@ public static class NetworkOperationCatalog
     // ---------------------------------------------------------------------------
     // Operation-specific validation
     // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// The optional I/O-map knobs of <c>read_hardware_config</c>: tag matching is meaningless
+    /// without I/O details, and a supplied <c>deviceName</c>/<c>plcName</c> must be nonblank —
+    /// a blank value names nothing and would be silently ignored by an ordinal filter.
+    /// </summary>
+    private static void ValidateReadHardwareConfig(NetworkOperationRequest operation, List<string> errors)
+    {
+        var prefix = $"Operation '{operation.Operation}' (operationId '{operation.OperationId}'):";
+
+        if (operation.IncludeTagMatches == true && operation.IncludeIoDetails != true)
+        {
+            errors.Add(
+                $"{prefix} 'includeTagMatches' requires 'includeIoDetails' to also be true: tag "
+                + "matches are attached to channels, which only exist inside ioDetails.");
+        }
+
+        if (operation.DeviceName is not null && string.IsNullOrWhiteSpace(operation.DeviceName))
+        {
+            errors.Add($"{prefix} 'deviceName' must not be blank when supplied.");
+        }
+
+        if (operation.PageSize is { } pageSize && (pageSize < 1 || pageSize > MaxPageSize))
+        {
+            errors.Add($"{prefix} 'pageSize' must be between 1 and {MaxPageSize} (received {pageSize}).");
+        }
+
+        if (operation.PlcName is not null && string.IsNullOrWhiteSpace(operation.PlcName))
+        {
+            errors.Add($"{prefix} 'plcName' must not be blank when supplied.");
+        }
+    }
 
     private static void ValidateListNetworkObjects(NetworkOperationRequest operation, List<string> errors)
     {
@@ -435,15 +496,7 @@ public static class NetworkOperationCatalog
             }
         }
 
-        ValidateSelectorValues(
-            target,
-            prefix,
-            errors,
-            allowMissingTypeIdentifier: string.Equals(
-                operationName,
-                "inspect_network_object",
-                StringComparison.Ordinal)
-                && string.Equals(target.Kind, NetworkObjectKinds.DeviceItem, StringComparison.Ordinal));
+        ValidateSelectorValues(target, prefix, errors);
 
         // Inapplicable selector fields.
         foreach (var (name, isSet) in AllSelectorFields)
@@ -462,6 +515,7 @@ public static class NetworkOperationCatalog
         ("kind", t => t.Kind is not null),
         ("deviceName", t => t.DeviceName is not null),
         ("itemPath", t => t.ItemPath is not null),
+        ("interfacePath", t => t.InterfacePath is not null),
         ("interfaceName", t => t.InterfaceName is not null),
         ("interfaceType", t => t.InterfaceType is not null),
         ("interfaceOperatingMode", t => t.InterfaceOperatingMode is not null),
@@ -481,6 +535,7 @@ public static class NetworkOperationCatalog
     {
         "deviceName" => !string.IsNullOrWhiteSpace(target.DeviceName),
         "itemPath" => target.ItemPath is { Count: > 0 },
+        "interfacePath" => target.InterfacePath is { Count: > 0 },
         "interfaceName" => !string.IsNullOrWhiteSpace(target.InterfaceName),
         "interfaceType" => !string.IsNullOrWhiteSpace(target.InterfaceType),
         "interfaceOperatingMode" => !string.IsNullOrWhiteSpace(target.InterfaceOperatingMode),
@@ -500,9 +555,32 @@ public static class NetworkOperationCatalog
     private static void ValidateSelectorValues(
         NetworkObjectTarget target,
         string prefix,
-        List<string> errors,
-        bool allowMissingTypeIdentifier)
+        List<string> errors)
     {
+        if (target.InterfacePath is { } interfacePath)
+        {
+            if (interfacePath.Count == 0)
+                errors.Add($"{prefix} 'target.interfacePath' must be non-empty.");
+            for (var index = 0; index < interfacePath.Count; index++)
+            {
+                var segment = interfacePath[index];
+                var member = $"{prefix} 'target.interfacePath[{index}]";
+                if (segment is null)
+                {
+                    errors.Add($"{member}' must not be null.");
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(segment.Name))
+                    errors.Add($"{member}.name' is required and must be nonblank.");
+                if (segment.PositionNumber is null)
+                    errors.Add($"{member}.positionNumber' is required.");
+                else if (segment.PositionNumber < 0)
+                    errors.Add($"{member}.positionNumber' must not be negative.");
+                if (segment.TypeIdentifier is not null && string.IsNullOrWhiteSpace(segment.TypeIdentifier))
+                    errors.Add($"{member}.typeIdentifier' must be nonblank when supplied.");
+            }
+        }
+
         if (target.ItemPath is { } itemPath)
         {
             if (itemPath.Count == 0)
@@ -543,16 +621,9 @@ public static class NetworkOperationCatalog
                     errors.Add($"{segmentPrefix}.positionNumber' must not be negative.");
                 }
 
-                if (segment.TypeIdentifier is null
-                    || (!allowMissingTypeIdentifier
-                        && string.IsNullOrWhiteSpace(segment.TypeIdentifier))
-                    || (allowMissingTypeIdentifier
-                        && segment.TypeIdentifier.Length > 0
-                        && string.IsNullOrWhiteSpace(segment.TypeIdentifier)))
+                if (string.IsNullOrWhiteSpace(segment.TypeIdentifier))
                 {
-                    errors.Add(allowMissingTypeIdentifier
-                        ? $"{segmentPrefix}.typeIdentifier' must be empty or nonblank."
-                        : $"{segmentPrefix}.typeIdentifier' is required and must be nonblank.");
+                    errors.Add($"{segmentPrefix}.typeIdentifier' is required and must be nonblank.");
                 }
             }
         }
@@ -576,10 +647,14 @@ public static class NetworkOperationCatalog
             errors.Add($"{prefix} 'target.number' must not be negative.");
         }
 
-        if (string.Equals(target.Kind, NetworkObjectKinds.Node, StringComparison.Ordinal)
-            && (target.ItemPath is null) != (target.NodeIndex is null))
+        if (target.Kind is null or NetworkObjectKinds.Node)
         {
-            errors.Add($"{prefix} 'target.itemPath' and 'target.nodeIndex' must be supplied together for kind '{target.Kind}'.");
+            if (target.InterfacePath is not null && target.ItemPath is not null)
+                errors.Add($"{prefix} 'target.interfacePath' and 'target.itemPath' cannot both be supplied.");
+            if (target.InterfacePath is null && (target.ItemPath is null) != (target.NodeIndex is null))
+                errors.Add($"{prefix} 'target.itemPath' and 'target.nodeIndex' must be supplied together for node targets.");
+            if (target.ItemPath is null && target.InterfacePath is null && target.InterfaceName is not null)
+                errors.Add($"{prefix} 'target.interfaceName' requires an owner path.");
         }
 
         if (target.NodeIndex is < 0)
@@ -648,11 +723,13 @@ public static class NetworkOperationCatalog
             // Phase 3: new selector fields are not applicable to configure.
             foreach (var field in ConfigureInapplicableSelectorFields)
             {
-                if (IsSelectorFieldPresent(target, field))
+                if (AllSelectorFields.Any(entry => entry.Name == field && entry.IsSet(target)))
                 {
                     errors.Add($"{prefix} 'target.{field}' is not applicable for configure_network_device.");
                 }
             }
+
+            ValidateSelectorValues(target, prefix, errors);
 
             if (string.IsNullOrWhiteSpace(target.DeviceName))
             {
@@ -690,6 +767,11 @@ public static class NetworkOperationCatalog
             {
                 errors.Add($"{prefix} 'changes.{name}' must not be blank. Omit it to leave the setting unchanged.");
             }
+        }
+
+        if (changes.PnDeviceNameAutoGeneration is not null)
+        {
+            requested++;
         }
 
         var subnet = changes.Subnet;
@@ -821,10 +903,8 @@ public static class NetworkOperationCatalog
         => ValidateSubnetTargetSelector(operation, errors);
 
     /// <summary>
-    /// Requires the target to name exactly one subnet: kind absent or exactly 'subnet', a nonblank
-    /// subnetId, and no other selector field. Unlike configure_network_device's 'node' default,
-    /// there is no legacy caller to accommodate here — an explicit non-subnet kind is still rejected
-    /// rather than silently reinterpreted.
+    /// Requires the target to name exactly one subnet: kind exactly 'subnet', a nonblank subnetId,
+    /// and no other selector field.
     /// </summary>
     private static void ValidateSubnetTargetSelector(NetworkOperationRequest operation, List<string> errors)
     {
@@ -835,7 +915,7 @@ public static class NetworkOperationCatalog
 
         var prefix = $"Operation '{operation.Operation}' (operationId '{operation.OperationId}'):";
 
-        if (target.Kind is not null && !string.Equals(target.Kind, NetworkObjectKinds.Subnet, StringComparison.Ordinal))
+        if (!string.Equals(target.Kind, NetworkObjectKinds.Subnet, StringComparison.Ordinal))
         {
             errors.Add(
                 $"{prefix} 'target.kind' must be '{NetworkObjectKinds.Subnet}' for {operation.Operation} "
@@ -904,7 +984,7 @@ public static class NetworkOperationCatalog
     {
         var specs = new[]
         {
-            new NetworkOperationSpec("read_hardware_config", NetworkOperationCategory.Read, None, None),
+            new NetworkOperationSpec("read_hardware_config", NetworkOperationCategory.Read, None, new[] { "deviceName", "plcName", "includeIoDetails", "includeTagMatches", "pageSize", "cursor" }),
             new NetworkOperationSpec("search_equipment_catalog", NetworkOperationCategory.Read, new[] { "query" }, new[] { "maxResults" }),
             new NetworkOperationSpec("add_network_device", NetworkOperationCategory.Write, new[] { "typeIdentifier", "deviceName" }, new[] { "deviceItemName" }),
             new NetworkOperationSpec("configure_network_device", NetworkOperationCategory.Write, new[] { "target", "changes" }, None),
