@@ -36,6 +36,15 @@ public sealed class ToolOutputContractConformanceTests
 
     private static readonly IReadOnlyDictionary<string, ToolProbe> StructuredToolProbes = new[]
     {
+        new ToolProbe("engineering_read", "succeeded", false, "engineering-roundtrip",
+            new() { ["operation"] = new { operation = "list_opcua_interfaces", plcName = "PLC_1" } }),
+        new ToolProbe("engineering_read", "rejected", true, null,
+            new() { ["operation"] = new { operation = "unknown" } }),
+        new ToolProbe("engineering_write", "previewed", false, "engineering-roundtrip",
+            new() { ["operation"] = new { operation = "set_hardware_parameters", deviceName = "PLC_1",
+                itemPath = new[] { "Rack", "SM" }, changes = new { Gain = 1 }, expectedStateHash = new string('a', 64) }, ["dryRun"] = true }),
+        new ToolProbe("engineering_write", "rejected", true, null,
+            new() { ["operation"] = new { operation = "unknown" } }),
         new ToolProbe("bind_project", "succeeded", false, null, new()),
         new ToolProbe("bind_project", "rejected", true, null,
             new Dictionary<string, object?> { ["projectPath"] = "relative.ap21" }),

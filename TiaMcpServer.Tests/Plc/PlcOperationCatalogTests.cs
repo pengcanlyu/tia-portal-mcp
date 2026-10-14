@@ -379,7 +379,7 @@ public class PlcOperationCatalogTests
     {
         // Field sets of the retired batch catalog; yamlContent/sourceContent became content and the
         // two update operations also require expectedContentHash.
-        ("update_block_logic", new[] { "blockPath", "content", "expectedContentHash" }, new[] { "format" }),
+        ("update_block_logic", new[] { "blockPath", "content", "expectedContentHash" }, new[] { "format", "contentFilePath", "contentFileSha256" }),
         ("create_tag_table", new[] { "tableName" }, new[] { "plcName", "folderPath" }),
         ("delete_tag_table", new[] { "tableName" }, new[] { "plcName", "folderPath" }),
         ("create_tag", new[] { "tableName", "name", "dataType" }, new[] { "plcName", "folderPath", "logicalAddress" }),
@@ -392,7 +392,7 @@ public class PlcOperationCatalogTests
         ("delete_block", new[] { "blockPath" }, Array.Empty<string>()),
         ("create_block_group", new[] { "blockPath" }, Array.Empty<string>()),
         ("delete_block_group", new[] { "blockPath" }, Array.Empty<string>()),
-        ("update_type_content", new[] { "typePath", "content", "expectedContentHash" }, new[] { "format" }),
+        ("update_type_content", new[] { "typePath", "content", "expectedContentHash" }, new[] { "format", "contentFilePath", "contentFileSha256" }),
     };
 
     [Fact]

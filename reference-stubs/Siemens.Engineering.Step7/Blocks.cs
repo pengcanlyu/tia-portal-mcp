@@ -141,5 +141,7 @@ namespace Siemens.Engineering.SW.Blocks
     }
     public enum ProgrammingLanguage : int
     {
+        DB = 5,
+        F_DB = 18,
     }
 }

@@ -1,5 +1,6 @@
 <Project>
   <PropertyGroup>
+    <Version>4.0.0-pengcanlyu.1</Version>
     <TiaPortalV21Dir Condition="'$(TiaPortalV21Dir)' == ''">C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48</TiaPortalV21Dir>
   </PropertyGroup>
 </Project>

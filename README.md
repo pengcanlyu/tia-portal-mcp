@@ -1,5 +1,10 @@
 # TIA Portal MCP server
 
+**pengcanlyu fork: 4.0.0-pengcanlyu.1**, based on upstream v4.0.0.
+See the [fork integration guide](https://github.com/pengcanlyu/tia-portal-mcp/blob/main/docs/guides/pengcanlyu-v4.md)
+for retained OPC UA tools, offline SAT export, local source-file input and new
+hardware module/channel parameter inspection and guarded editing.
+
 [![Build Status](https://img.shields.io/github/actions/workflow/status/Czarnak/tia-portal-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/Czarnak/tia-portal-mcp/actions)
 [![Codecov](https://img.shields.io/codecov/c/github/Czarnak/tia-portal-mcp?style=flat-square)](https://codecov.io/gh/Czarnak/tia-portal-mcp)
 [![GitHub Release](https://img.shields.io/github/v/release/Czarnak/tia-portal-mcp?style=flat-square)](https://github.com/Czarnak/tia-portal-mcp/releases)
@@ -16,11 +21,14 @@ The current implementation covers project discovery and lifecycle operations, PL
 
 ## Tools
 
-The server exposes 7 tools in `read-only`, 16 in `read-write` (the startup default), and the same 16 in `full`.
+This fork exposes 8 tools in `read-only`, 18 in `read-write` (the startup default), and the same 18 in `full`.
 `read-write` permits in-project edits, compilation and project lifecycle calls, asking once per actual lifecycle call.
 `full` adds no tools or operations; it only runs lifecycle calls without the prompt. Every write tool
-(`plc_write`, `network_write` and the six lifecycle tools) uses one guarded single-call pipeline; there are no
+(`plc_write`, `network_write`, `engineering_write` and the six lifecycle tools) uses one guarded single-call pipeline; there are no
 safety tokens and no PLC run/stop.
+
+- `engineering_read`: hardware parameter metadata/values, OPC UA interface listing and variable inspection.
+- `engineering_write`: hardware scalar parameters, OPC UA interface management and offline folder export. Defaults to `dryRun:true`; standalone projects only.
 
 ### PLC reads and cross-references
 

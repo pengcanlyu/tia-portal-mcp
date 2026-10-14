@@ -473,6 +473,17 @@ while ((line = Console.In.ReadLine()) is not null)
 
     switch (scenario)
     {
+        case "engineering-roundtrip":
+            var method = ReadMethod(line);
+            if (method == "get_project_status")
+                Respond(Success("{\"isOpen\":true}"));
+            else
+                Respond(Success(JsonSerializer.Serialize(new TiaMcpServer.Contracts.Extensions.EngineeringExtensionResult {
+                    Operation = method == "engineering_extension_probe" ? "set_hardware_parameters" : method!,
+                    StateHash = new string('a', 64),
+                    Details = JsonSerializer.SerializeToElement(new { offline = true })
+                }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })));
+            break;
         case "ok":
             // seq proves whether two requests hit the same process (2.1 reuse/restart tests).
             Respond($$"""{"success":true,"payload":"{\"seq\":{{seq}}}"}""");

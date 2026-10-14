@@ -31,8 +31,8 @@ public static class PlcOperationCatalog
 
         // Write field sets are the batch catalog's, with yamlContent/sourceContent renamed to content and
         // the two content updates also requiring the hash of the document they were based on.
-        ["update_block_logic"] = Write(new[] { "blockPath", "content", "expectedContentHash" }, new[] { "format" }),
-        ["update_type_content"] = Write(new[] { "typePath", "content", "expectedContentHash" }, new[] { "format" }),
+        ["update_block_logic"] = Write(new[] { "blockPath", "content", "expectedContentHash" }, new[] { "format", "contentFilePath", "contentFileSha256" }),
+        ["update_type_content"] = Write(new[] { "typePath", "content", "expectedContentHash" }, new[] { "format", "contentFilePath", "contentFileSha256" }),
         ["create_tag_table"] = Write(new[] { "tableName" }, new[] { "plcName", "folderPath" }),
         ["delete_tag_table"] = Write(new[] { "tableName" }, new[] { "plcName", "folderPath" }),
         ["create_tag"] = Write(new[] { "tableName", "name", "dataType" }, new[] { "plcName", "folderPath", "logicalAddress" }),
@@ -59,6 +59,8 @@ public static class PlcOperationCatalog
         ("tableName", op => op.TableName),
         ("folderPath", op => op.FolderPath),
         ("content", op => op.Content),
+        ("contentFilePath", op => op.ContentFilePath),
+        ("contentFileSha256", op => op.ContentFileSha256),
         ("expectedContentHash", op => op.ExpectedContentHash),
         ("name", op => op.Name),
         ("newName", op => op.NewName),
@@ -227,7 +229,8 @@ public static class PlcOperationCatalog
             }
         }
 
-        var missing = spec.Required.Where(field => !IsPresent(operation, field)).ToArray();
+        var missing = spec.Required.Where(field => !IsPresent(operation, field)
+            && !(field == "content" && !string.IsNullOrWhiteSpace(operation.ContentFilePath))).ToArray();
         if (missing.Length > 0)
         {
             errors.Add($"{prefix} is missing required field(s): {string.Join(", ", missing)}.");

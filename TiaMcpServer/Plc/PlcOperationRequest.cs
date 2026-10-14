@@ -42,6 +42,12 @@ public sealed class PlcOperationRequest : IOperationBatchItem
     [Description("Full replacement document for update_block_logic (Simatic ML XML or external source) or update_type_content (external source or Simatic ML XML), in the write format. Required by both.")]
     public string? Content { get; set; }
 
+    [Description("Alternative to inline content: absolute local UTF-8 replacement file, with contentFileSha256 of its exact bytes. For update_block_logic/update_type_content only. Does not remove the target expectedContentHash guard.")]
+    public string? ContentFilePath { get; set; }
+
+    [Description("SHA256 of exact contentFilePath bytes. Required with contentFilePath.")]
+    public string? ContentFileSha256 { get; set; }
+
     [Description("Format-tagged contentHash from a plc_read of the same object in the same format (xml:sha256:<hex> or source:sha256:<hex>). Required by update_block_logic and update_type_content; a changed object fails with state_changed.")]
     public string? ExpectedContentHash { get; set; }
 

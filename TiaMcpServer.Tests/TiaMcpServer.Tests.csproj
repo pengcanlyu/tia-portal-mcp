@@ -8,6 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\TiaMcpServer\Extensions\*.cs" Link="Extensions\%(Filename)%(Extension)" />
+    <Compile Include="..\TiaMcpServer.OpennessWorker\Openness\OpcUa\OpcUaModelFingerprint.cs" Link="Extensions\OpcUaModelFingerprint.cs" />
     <Compile Include="..\TiaMcpServer.OpennessWorker\Openness\Network\NetworkConfigurationTargetBinding.cs" Link="Network\NetworkConfigurationTargetBinding.cs" />
 
     <Compile Include="..\TiaMcpServer.OpennessWorker\Openness\Network\NetworkNodeReadSelectorBuilder.cs" Link="Network\NetworkNodeReadSelectorBuilder.cs" />

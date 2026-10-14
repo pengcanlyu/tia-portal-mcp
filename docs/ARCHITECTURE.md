@@ -4,6 +4,17 @@ This document describes the current `tia-portal-mcp` runtime architecture, tool
 surface, access-mode enforcement, project binding, write-safety model, and test
 strategy.
 
+## pengcanlyu fork extension layer
+
+This fork adds `engineering_read` and `engineering_write` (8/18/18 total tools)
+through the existing host/worker transport and guarded write pipeline. The
+extension domain is standalone-only, defaults writes to preview, and includes
+dynamic scalar hardware/channel parameters, retained OPC UA management and
+offline folder export. PLC block/type updates also accept pinned local UTF-8
+source files, resolved by the host before planning. See the
+[fork guide](guides/pengcanlyu-v4.md). Historical upstream counts below refer to
+the upstream layer, not total fork discovery.
+
 ## 1. Process topology
 
 Siemens TIA Portal Openness is a .NET Framework 4.8 API. The MCP host targets

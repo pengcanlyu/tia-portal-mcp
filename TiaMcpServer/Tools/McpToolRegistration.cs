@@ -5,6 +5,7 @@ using TiaMcpServer.Plc;
 using TiaMcpServer.ProjectLifecycle;
 using TiaMcpServer.Safety.Pipeline;
 using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Extensions;
 
 namespace TiaMcpServer.Tools;
 
@@ -14,11 +15,11 @@ public static class McpToolRegistration
     public static IMcpServerBuilder WithAccessModeTools(this IMcpServerBuilder builder, McpAccessMode mode)
     {
         _ = McpAccessModeNames.ToName(mode); // Reject an invalid configuration before registration.
-        builder.WithProjectReadTools().WithProjectBindingTools().WithTools<NetworkReadTools>().WithTools<Plc.PlcReadTools>().WithTools<Hmi.HmiReadTools>().WithTools<CrossReferences.CrossReferenceReadTools>();
+        builder.WithProjectReadTools().WithProjectBindingTools().WithTools<NetworkReadTools>().WithTools<Plc.PlcReadTools>().WithTools<Hmi.HmiReadTools>().WithTools<CrossReferences.CrossReferenceReadTools>().WithTools<Extensions.EngineeringReadTools>();
         if (OperationPolicyCatalog.IsCapabilityAllowed(mode, OperationCapability.Compile))
             builder.WithTools<ProjectEngineeringTools>();
         if (OperationPolicyCatalog.IsCapabilityAllowed(mode, OperationCapability.ProjectMutation))
-            builder.WithNetworkWriteTools().WithPlcWriteTools();
+            builder.WithNetworkWriteTools().WithPlcWriteTools().WithEngineeringWriteTools();
         if (OperationPolicyCatalog.IsCapabilityAllowed(mode, OperationCapability.ProjectLifecycle))
             builder.WithTools<ProjectWriteTools>();
         return builder;

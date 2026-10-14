@@ -179,6 +179,8 @@ public class McpToolSchemaTests
             "network_write",
             "plc_read",
             "plc_write",
+            "engineering_read",
+            "engineering_write",
             "read_cross_references"
         };
 
@@ -187,7 +189,7 @@ public class McpToolSchemaTests
     }
 
     [Fact]
-    public void McpReadOnlySurface_RemainsExactlySevenApprovedTools()
+    public void McpReadOnlySurface_RemainsExactlyEightApprovedTools()
     {
         var toolNames = new[]
         {
@@ -197,6 +199,7 @@ public class McpToolSchemaTests
             typeof(TiaMcpServer.Plc.PlcReadTools),
             typeof(TiaMcpServer.Hmi.HmiReadTools),
             typeof(TiaMcpServer.CrossReferences.CrossReferenceReadTools),
+            typeof(TiaMcpServer.Extensions.EngineeringReadTools),
         }
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
             .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
@@ -206,7 +209,7 @@ public class McpToolSchemaTests
             .ToArray();
 
         Assert.Equal(
-            new[] { "bind_project", "browse_project_tree", "get_project_status", "hmi_read", "network_read", "plc_read", "read_cross_references" },
+            new[] { "bind_project", "browse_project_tree", "engineering_read", "get_project_status", "hmi_read", "network_read", "plc_read", "read_cross_references" },
             toolNames);
         Assert.DoesNotContain("probe_network_object_attributes", toolNames);
     }

@@ -72,6 +72,8 @@ public sealed class PlcWriteInvokerTests
         var expected = new List<object>();
         foreach (var field in required.Concat(optional))
         {
+            // File inputs are resolved and hash-checked by the host; only their bytes reach the worker.
+            if (field is "contentFilePath" or "contentFileSha256") continue;
             var property = PropertyFor(field);
             var value = SentinelFor(property, field, operation);
             property.SetValue(request, value);

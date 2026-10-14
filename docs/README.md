@@ -9,7 +9,8 @@ For the project overview, tool list, and quick start, see the [README](../README
 
 | Document | What you will find |
 | --- | --- |
-| [Installation](guides/installation.md) | Requirements, installation/doctor, explicit binding, 7/16/16 modes, and mode-derived lifecycle confirmation |
+| [pengcanlyu v4 integration](guides/pengcanlyu-v4.md) | Fork migration, 8/18/18 tools, SM parameters, OPC UA, local source files, offline SAT export and authorization |
+| [Installation](guides/installation.md) | Requirements, installation/doctor, explicit binding, 8/18/18 fork modes, and mode-derived lifecycle confirmation |
 | [MCP client configuration](guides/mcp-client-configuration.md) | Client configuration, bind/open migration, lifecycle confirmation, guarded Network and `plc_write` migration, and block paths |
 | [Troubleshooting](guides/troubleshooting.md) | Common failures, and TIA Portal V21 behaviors verified against a real installation |
 | [Supported operations](SupportedOperations/README.md) | Every operation by area — project, PLC, devices, network, HMI, and more |

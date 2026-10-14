@@ -159,6 +159,9 @@ internal static class Program
 
             return request.Method switch
             {
+                "inspect_hardware_parameters" or "list_opcua_interfaces" or "inspect_opcua_variables" => WithEngineeringRoot(request, project => Success(TiaMcpServer.OpennessWorker.Openness.Extensions.EngineeringExtensionService.Read(project, request.EngineeringQuery!))),
+                "engineering_extension_probe" => WithEngineeringRoot(request, project => Success(TiaMcpServer.OpennessWorker.Openness.Extensions.EngineeringExtensionService.Probe(project, request.EngineeringQuery!))),
+                "set_hardware_parameters" or "generate_opcua_interface" or "set_opcua_interface_enabled" or "delete_opcua_interface" or "export_opcua_interface" or "export_plc_to_folder" => WithEngineeringRoot(request, project => Success(TiaMcpServer.OpennessWorker.Openness.Extensions.EngineeringExtensionService.Apply(project, request.EngineeringQuery!, request.ExtensionProbeHash!))),
                 "list_tia_portal_processes" => ListPortalProcesses(request),
                 "list_server_connections" or "list_server_groups" or "list_server_projects" or "list_local_sessions" or "get_lock_state"
                     => WithPortalRead(request, _ => MultiuserPortalReadDispatch.Invoke(_sharedInventory, request)),

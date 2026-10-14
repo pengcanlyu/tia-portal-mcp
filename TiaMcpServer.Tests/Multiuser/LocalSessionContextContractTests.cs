@@ -324,11 +324,13 @@ public sealed class LocalSessionContextContractTests
         var publicTools = new[]
         {
             "bind_project", "get_project_status", "browse_project_tree", "plc_read", "plc_write",
-            "network_read", "network_write", "read_cross_references", "compile_check", "hmi_read",
+            "network_read", "network_write", "read_cross_references", "compile_check", "hmi_read", "engineering_read", "engineering_write",
             "open_project", "create_project", "save_project", "save_project_as", "archive_project", "close_project"
         };
         var projectItems = PlcOperationCatalog.ReadOperationNames
             .Concat(PlcOperationCatalog.WriteOperationNames)
+            .Concat(TiaMcpServer.Contracts.Extensions.EngineeringExtensionOperations.Reads)
+            .Concat(TiaMcpServer.Contracts.Extensions.EngineeringExtensionOperations.Writes)
             .Concat(NetworkOperationCatalog.ReadOperationNames)
             .Concat(NetworkOperationCatalog.WriteOperationNames)
             .Where(name => name != "search_equipment_catalog");

@@ -34,7 +34,9 @@ public sealed class PlcWriteDomain(OpennessWorkerClient client)
             return WriteValidation.Invalid(WorkerFailureCategories.ValidationError,
                 "The encoded operation identities leave insufficient room for the required response summaries. Use smaller plc_write calls.");
         var errors = PlcOperationCatalog.ValidateAccessMode(items, accessMode);
-        return errors.Count == 0 ? WriteValidation.Valid() : WriteValidation.Invalid(WorkerFailureCategories.AccessDenied, string.Join("\n", errors));
+        if (errors.Count != 0) return WriteValidation.Invalid(WorkerFailureCategories.AccessDenied, string.Join("\n", errors));
+        var contentError = Extensions.LocalPlcContent.Resolve(items);
+        return contentError == null ? WriteValidation.Valid() : WriteValidation.Invalid(WorkerFailureCategories.ValidationError, contentError);
     }
 
     public async Task<WritePlan<PlcWriteEffect>> PlanAsync(string? projectPath, IReadOnlyList<PlcOperationRequest> items)

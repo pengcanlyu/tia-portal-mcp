@@ -2,6 +2,16 @@
 #nullable disable // V21 net48 signatures have no nullable annotations.
 namespace Siemens.Engineering.SW.Types
 {
+    public abstract class PlcStruct : PlcType { }
+    public abstract class PlcSystemTypeGroup
+    {
+        public PlcTypeComposition Types => throw new System.NotSupportedException();
+    }
+    public abstract class PlcSystemTypeGroupComposition : System.Collections.Generic.IEnumerable<PlcSystemTypeGroup>
+    {
+        public System.Collections.Generic.IEnumerator<PlcSystemTypeGroup> GetEnumerator() => throw new System.NotSupportedException();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => throw new System.NotSupportedException();
+    }
     public abstract class PlcType : global::Siemens.Engineering.IEngineeringObject, global::Siemens.Engineering.IEngineeringInstance, global::Siemens.Engineering.SW.ExternalSources.IGenerateSource, global::Siemens.Engineering.IEngineeringServiceProvider
     {
         public string Name { get => throw new global::System.NotSupportedException(); }
@@ -34,6 +44,7 @@ namespace Siemens.Engineering.SW.Types
     }
     public abstract class PlcTypeSystemGroup : global::Siemens.Engineering.SW.Types.PlcTypeGroup, global::Siemens.Engineering.IEngineeringObject, global::Siemens.Engineering.IEngineeringInstance
     {
+        public PlcSystemTypeGroupComposition SystemTypeGroups => throw new System.NotSupportedException();
         object global::Siemens.Engineering.IEngineeringObject.GetAttribute(string name) => throw new global::System.NotSupportedException();
         void global::Siemens.Engineering.IEngineeringObject.SetAttribute(string name, object value) => throw new global::System.NotSupportedException();
         global::System.Collections.Generic.IList<global::Siemens.Engineering.EngineeringAttributeInfo> global::Siemens.Engineering.IEngineeringObject.GetAttributeInfos() => throw new global::System.NotSupportedException();

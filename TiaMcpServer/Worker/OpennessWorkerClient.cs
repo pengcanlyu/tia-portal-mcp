@@ -1195,6 +1195,9 @@ public class OpennessWorkerClient : IDisposable
     }
 
     /// <summary>Runs one hmi_read operation; <paramref name="method"/> is the hmi_-prefixed worker method.</summary>
+    public Task<WorkerCallResult> EngineeringExtensionAsync(string method, TiaMcpServer.Contracts.Extensions.EngineeringQuery query, string? projectPath, string? probeHash = null)
+        => SendBoundProjectRequestAsync(method, projectPath, request => { request.EngineeringQuery = query; request.ExtensionProbeHash = probeHash; }, "{}");
+
     public Task<WorkerCallResult> ReadHmiAsync(string method, HmiQueryInfo query, string? projectPath)
     {
         return SendBoundProjectRequestAsync(

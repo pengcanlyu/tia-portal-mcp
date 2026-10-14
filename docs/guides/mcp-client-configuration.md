@@ -36,7 +36,7 @@ elicitation `accept` with boolean `confirm:true`, even with no guards or only in
 without that capability receives `access_denied`; decline, cancel, timeout, or transport failure
 also denies. Set `"args": ["--access-mode", "full"]` for the same sixteen tools with lifecycle
 policy confirmation and no server elicitation; full adds no tools or operations.
-`tia-mcp install` defaults separately to read-only with seven tools, including `bind_project`.
+`tia-mcp install` defaults separately to read-only with eight tools in this fork, including `bind_project` and `engineering_read`.
 Block guards stop the call in every mode. See [Installation](installation.md#access-modes).
 
 Remove the old startup confirmation switch; it is rejected with:

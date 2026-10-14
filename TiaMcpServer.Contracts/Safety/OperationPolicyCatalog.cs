@@ -87,6 +87,16 @@ public static class OperationPolicyCatalog
     {
         var dict = new Dictionary<string, OperationCapability>(StringComparer.Ordinal)
         {
+            ["engineering_extension_probe"] = OperationCapability.Observe,
+            ["inspect_hardware_parameters"] = OperationCapability.Observe,
+            ["list_opcua_interfaces"] = OperationCapability.Observe,
+            ["inspect_opcua_variables"] = OperationCapability.TemporaryExport,
+            ["set_hardware_parameters"] = OperationCapability.ProjectMutation,
+            ["generate_opcua_interface"] = OperationCapability.ProjectMutation,
+            ["set_opcua_interface_enabled"] = OperationCapability.ProjectMutation,
+            ["delete_opcua_interface"] = OperationCapability.ProjectMutation,
+            ["export_opcua_interface"] = OperationCapability.ProjectMutation,
+            ["export_plc_to_folder"] = OperationCapability.ProjectMutation,
             // Observe (read-only safe)
             ["get_project_status"] = OperationCapability.Observe,
             ["list_tia_portal_processes"] = OperationCapability.Observe,

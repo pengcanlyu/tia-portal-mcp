@@ -46,6 +46,13 @@ public static class ProjectCapabilityCatalog
         "probe_io_system_qualification", "probe_subnet_lifecycle_mutations"
     };
 
+    private static readonly string[] StandaloneExtensionOperations =
+    {
+        "engineering_read", "engineering_write",
+        "inspect_hardware_parameters", "list_opcua_interfaces", "inspect_opcua_variables",
+        "set_hardware_parameters", "generate_opcua_interface", "set_opcua_interface_enabled", "delete_opcua_interface", "export_opcua_interface", "export_plc_to_folder"
+    };
+
     private static readonly string[] NonProjectMethods =
     {
         "hello", "select_portal_project", "list_tia_portal_processes", "list_server_connections",
@@ -89,6 +96,7 @@ public static class ProjectCapabilityCatalog
             "get_basic_project_status" => "get_project_status",
             "probe_open_project_rebind" or "probe_project_status_for_lifecycle" => "open_project",
             "probe_network_object_attributes" => "network_read",
+            "engineering_extension_probe" => "engineering_write",
             "probe_io_system_qualification" or "probe_subnet_lifecycle_mutations" => "network_write",
             _ => method
         };
@@ -128,7 +136,7 @@ public static class ProjectCapabilityCatalog
                     ? ProjectCapabilityApplicabilities.NotYetDelivered
                     : ProjectCapabilityApplicabilities.ProjectContent
             });
-        foreach (var operation in StandaloneLifecycleOperations)
+        foreach (var operation in StandaloneLifecycleOperations.Concat(StandaloneExtensionOperations))
             result.Add(new ProjectCapabilityInfo
             {
                 Operation = operation,
