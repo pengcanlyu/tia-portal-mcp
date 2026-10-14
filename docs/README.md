@@ -38,6 +38,7 @@ For the project overview, tool list, and quick start, see the [README](../README
 | --- | --- |
 | [Contributing](../CONTRIBUTING.md) | Contribution workflow, branch focus, commit message format, pull requests |
 | [Building from source](development/building.md) | Restore, build, test with coverage, and run the server locally |
+| [pengcanlyu v4 verification](development/pengcanlyu-v4-verification.md) | Scoped automated/live evidence, restored analog parameter, OPC UA and offline export checks, explicit limits |
 | [Local MCP sandbox testing](development/local-mcp-testing.md) | MCP Inspector, actual-by-default Network inputs, frozen Network fixtures/restoration boundaries, and lifecycle gates |
 | [Packaging](development/packaging.md) | Build the NuGet package and install a local branch build as the `tia-mcp` global tool |
 | [Bug-fix wave orchestration](development/bug-fix-wave-orchestration.md) | Branch/worktree ownership, wave barriers, offline/live gates, PR creation, and merge protocol |
