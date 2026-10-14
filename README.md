@@ -1,6 +1,6 @@
 # TIA Portal MCP server
 
-**pengcanlyu fork: 4.0.0-pengcanlyu.1**, based on upstream v4.0.0.
+**pengcanlyu fork: 4.0.0-pengcanlyu.2**, based on upstream v4.0.0.
 See the [fork integration guide](https://github.com/pengcanlyu/tia-portal-mcp/blob/main/docs/guides/pengcanlyu-v4.md)
 for retained OPC UA tools, offline SAT export, local source-file input and new
 hardware module/channel parameter inspection and guarded editing.
@@ -27,8 +27,8 @@ This fork exposes 8 tools in `read-only`, 18 in `read-write` (the startup defaul
 (`plc_write`, `network_write`, `engineering_write` and the six lifecycle tools) uses one guarded single-call pipeline; there are no
 safety tokens and no PLC run/stop.
 
-- `engineering_read`: hardware parameter metadata/values, OPC UA interface listing and variable inspection.
-- `engineering_write`: hardware scalar parameters, OPC UA interface management and offline folder export. Defaults to `dryRun:true`; standalone projects only.
+- `engineering_read`: hardware capabilities/values/addresses, layout and module placement preflight, OPC UA interface listing and variable inspection.
+- `engineering_write`: guarded module insertion, hardware parameters and I/O start addresses, hardware compile, OPC UA interface management and offline folder export. Defaults to `dryRun:true`; standalone projects only. See the [coverage matrix](docs/guides/openness-hardware-coverage.md).
 
 ### PLC reads and cross-references
 

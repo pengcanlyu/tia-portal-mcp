@@ -138,7 +138,7 @@ public class IoChannelControllerResolverTests
             {
                 IoType = "Input",
                 StartAddress = 10,
-                Length = 2, // bytes 10..11 -> bits 80..95 (half-open [80, 96))
+                Length = 16, // bytes 10..11 -> bits 80..95 (half-open [80, 96))
                 ControllerNames = new[] { "PLC_1" },
             },
         };
@@ -173,7 +173,7 @@ public class IoChannelControllerResolverTests
             {
                 IoType = "Input",
                 StartAddress = 0,
-                Length = 2, // bits [0, 16)
+                Length = 16, // bits [0, 16)
                 ControllerNames = new[] { "PLC_1" },
             },
         };
@@ -271,7 +271,7 @@ public class IoChannelControllerResolverTests
             {
                 IoType = "Input",
                 StartAddress = 10,
-                Length = 2,
+                Length = 16,
                 ControllerNames = Array.Empty<string>(),
                 ControllerAssociationReadable = false, // unreadable, but for unrelated range 10..11
             },
@@ -368,5 +368,39 @@ public class IoChannelControllerResolverTests
         Assert.Equal(IoChannelControllerStatus.NoInterval, result.Status);
         Assert.Null(result.ControllerName);
         Assert.Null(result.DiagnosticMessage);
+    }
+
+    [Fact]
+    public void Resolve_AdjacentAi8Ranges_Uses128BitsNot128Bytes()
+    {
+        var addresses = new[]
+        {
+            new IoAddressRecord { IoType = "Input", StartAddress = 126, Length = 128, ControllerNames = new[] { "PLC_A" } },
+            new IoAddressRecord { IoType = "Input", StartAddress = 142, Length = 128, ControllerNames = new[] { "PLC_B" } },
+        };
+
+        var lastOfFirst = IoChannelControllerResolver.Resolve("Input", 140 * 8, 16u, addresses, ItemDesc);
+        var firstOfSecond = IoChannelControllerResolver.Resolve("Input", 142 * 8, 16u, addresses, ItemDesc);
+        var pastSecond = IoChannelControllerResolver.Resolve("Input", 158 * 8, 16u, addresses, ItemDesc);
+
+        Assert.Equal(IoChannelControllerStatus.Resolved, lastOfFirst.Status);
+        Assert.Equal("PLC_A", lastOfFirst.ControllerName);
+        Assert.Equal(IoChannelControllerStatus.Resolved, firstOfSecond.Status);
+        Assert.Equal("PLC_B", firstOfSecond.ControllerName);
+        Assert.Equal(IoChannelControllerStatus.NoContainingAddress, pastSecond.Status);
+    }
+
+    [Fact]
+    public void Resolve_NonByteAlignedBitLength_DoesNotRoundUpOwnership()
+    {
+        var addresses = new[]
+        {
+            new IoAddressRecord { IoType = "Input", StartAddress = 4, Length = 14, ControllerNames = new[] { "PLC_1" } },
+        };
+
+        Assert.Equal(IoChannelControllerStatus.Resolved,
+            IoChannelControllerResolver.Resolve("Input", 45, 1u, addresses, ItemDesc).Status);
+        Assert.Equal(IoChannelControllerStatus.NoContainingAddress,
+            IoChannelControllerResolver.Resolve("Input", 46, 1u, addresses, ItemDesc).Status);
     }
 }

@@ -46,7 +46,7 @@ public class IoAddressInfo
     public int? StartAddress { get; set; }
 
     /// <summary>
-    /// Raw address length reported by Openness, in bytes. Null when unreadable.
+    /// Raw address length reported by Openness, in bits. Null when unreadable.
     /// </summary>
     public int? Length { get; set; }
 

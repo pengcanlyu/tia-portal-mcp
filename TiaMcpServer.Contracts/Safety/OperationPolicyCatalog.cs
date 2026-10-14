@@ -89,6 +89,11 @@ public static class OperationPolicyCatalog
         {
             ["engineering_extension_probe"] = OperationCapability.Observe,
             ["inspect_hardware_parameters"] = OperationCapability.Observe,
+            ["inspect_hardware_capabilities"] = OperationCapability.Observe,
+            ["inspect_hardware_layout"] = OperationCapability.Observe,
+            ["check_hardware_module"] = OperationCapability.Observe,
+            ["plug_hardware_module"] = OperationCapability.ProjectMutation,
+            ["compile_hardware"] = OperationCapability.Compile,
             ["list_opcua_interfaces"] = OperationCapability.Observe,
             ["inspect_opcua_variables"] = OperationCapability.TemporaryExport,
             ["set_hardware_parameters"] = OperationCapability.ProjectMutation,
