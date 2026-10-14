@@ -279,7 +279,7 @@ A device item with I/O details carries:
 
 ### Unit and formatting semantics
 
-- `startAddress`/`length` on an address are **bytes** as reported by Openness.
+- `startAddress` is a **byte offset**; `length` is a **bit length** as reported by Openness. Channel ownership uses these distinct units (for example, an AI8 range is 128 bits / 16 bytes).
   `channelAddressBits`/`channelWidthBits` on a channel are **absolute bits** as reported by
   Openness. The two unit families are never mixed or converted silently.
 - `logicalAddress` is formatted only when the channel's I/O type, bit start, and width are all

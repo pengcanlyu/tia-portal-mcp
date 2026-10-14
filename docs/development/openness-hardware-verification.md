@@ -27,7 +27,7 @@ compile tool proves access and truthful diagnostics, not migration acceptance.
 Successful writes also do not establish physical sensor/load compatibility.
 
 Installed worker SHA256:
-`d214bfaaecdb567fae2b058b606208f74e5268012c96d825acd386ca295f08e3`.
+`4b3c735c74cb352dfb37cb117904bebcc6dd9fb7be18fa0ce7cf4582c6c029be`.
 Whitelist and restricted authorization-helper identity were refreshed to this
 exact installed binary. Windows UAC was not automated.
 
@@ -37,9 +37,12 @@ exact installed binary. Windows UAC was not automated.
 - The final hardware-focused test selection passed 30 tests, including exact
   selectors, stale/invalid hashes, access-mode classification, separate physical
   containers, bounded discovery, and mixed byte-offset/bit-length collisions.
-- The final local full suite passed **6,040 tests**, with zero failures or skips.
-  CI outcomes are recorded with the pull request; intermediate runs are not
-  evidence for later candidate revisions.
+- The hardware extension candidate passed **6,040 full-suite tests** with zero
+  failures or skips. A subsequent correction applies the same bit-length units
+  to the existing I/O-map controller resolver; the combined hardware and resolver
+  selection passed **54 tests**, including two new interval regressions. Final
+  full-suite and CI outcomes are recorded with the pull request, not inferred
+  from the earlier run.
 - `ref/` remains generated compile-only declarations, not Siemens implementation
   DLLs. The declaration source-hash verifier is retained.
 

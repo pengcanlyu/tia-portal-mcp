@@ -9,6 +9,7 @@ public sealed class IoAddressRecord
 
     public int? StartAddress { get; set; }
 
+    /// <summary>Raw Openness address length in bits; StartAddress is in bytes.</summary>
     public int? Length { get; set; }
 
     public IReadOnlyList<string> ControllerNames { get; set; } = Array.Empty<string>();
@@ -123,7 +124,7 @@ public static class IoChannelControllerResolver
                 }
 
                 var addressStartBit = (long)address.StartAddress.Value * 8;
-                var addressEndBit = addressStartBit + ((long)address.Length.Value * 8);
+                var addressEndBit = addressStartBit + address.Length.Value;
 
                 if (addressStartBit <= channelStartBit && channelEndBit <= addressEndBit)
                 {

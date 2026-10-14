@@ -62,6 +62,8 @@ address target. Length and I/O direction cannot be changed through this editor.
 `lengthBytes` is rounded up for cabinet/address planning. In the V21 fixtures,
 both G1 AI8 and 7NF AI8 reported 128 bits for their 16-byte input range. Collision
 checks convert byte starts to bits rather than treating 128 as 128 bytes.
+The existing `network_read` I/O-map controller resolver uses the same units;
+its former byte-length assumption and documentation were corrected as well.
 Without an address controller, collision verification cannot be completed and
 the write is refused. All assigned controllers and their registered ranges in the
 same Input/Output address space are checked. Hardware compile is still required.
